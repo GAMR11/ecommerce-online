@@ -11,9 +11,6 @@ class Metric extends Model
 {
     use HasFactory;
 
-    /**
-     * Los atributos que se pueden asignar masivamente.
-     */
     protected $fillable = [
         'type',
         'tool',
@@ -21,82 +18,57 @@ class Metric extends Model
         'timestamp',
     ];
 
-    /**
-     * Los atributos que deben ser casteados.
-     */
     protected $casts = [
-        'data' => 'array',  // Importante: convierte JSON a array automáticamente
+        'data' => 'array',
         'timestamp' => 'datetime',
     ];
 
-    /**
-     * Scopes para queries comunes
-     */
+    // ============================================
+    // SCOPES
+    // ============================================
 
-    // Filtrar por tipo de métrica
     public function scopeOfType(Builder $query, string $type): Builder
     {
         return $query->where('type', $type);
     }
 
-    // Filtrar por herramienta
     public function scopeForTool(Builder $query, string $tool): Builder
     {
         return $query->where('tool', $tool);
     }
 
-    // Filtrar por rango de fechas
     public function scopeInPeriod(Builder $query, int $days): Builder
     {
         return $query->where('timestamp', '>=', now()->subDays($days));
     }
 
-    // Filtrar desde una fecha específica
-    public function scopeSince(Builder $query, Carbon $date): Builder
-    {
-        return $query->where('timestamp', '>=', $date);
-    }
-
-    // Filtrar entre fechas
     public function scopeBetween(Builder $query, Carbon $start, Carbon $end): Builder
     {
         return $query->whereBetween('timestamp', [$start, $end]);
     }
 
-    /**
-     * Accesores para datos específicos del JSON
-     */
+    // ============================================
+    // ACCESSORS
+    // ============================================
 
-    // Obtener el lead time en segundos (si existe)
     public function getLeadTimeSecondsAttribute(): ?int
     {
         return $this->data['lead_time_seconds'] ?? null;
     }
 
-    // Obtener si fue un fallo (para deployment-result)
     public function getIsFailureAttribute(): bool
     {
         return $this->data['is_failure'] ?? false;
     }
 
-    // Obtener el commit hash
     public function getCommitAttribute(): ?string
     {
         return $this->data['commit'] ?? null;
     }
 
-    // Obtener el tiempo de resolución (para incidents)
-    public function getResolutionTimeAttribute(): ?Carbon
-    {
-        if (isset($this->data['resolution_time'])) {
-            return Carbon::parse($this->data['resolution_time']);
-        }
-        return null;
-    }
-
-    /**
-     * Métodos helper para crear métricas específicas
-     */
+    // ============================================
+    // MÉTODOS ESTÁTICOS HELPER
+    // ============================================
 
     public static function recordDeployment(string $tool, array $data): self
     {

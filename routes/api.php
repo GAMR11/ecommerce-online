@@ -2,21 +2,34 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\MetricsContrller;
+use App\Http\Controllers\MetricasController;
 
-/*
-|--------------------------------------------------------------------------
-| API Routes
-|--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
-*/
+// ============================================
+// RUTAS DE MÉTRICAS DORA
+// ============================================
 
-Route::post('/metrics/{type}', [MetricsController::class, 'store']);
+Route::prefix('metrics')
+    // ->middleware('metrics.api')
+    ->group(function () {
 
-Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
-    return $request->user();
+        // Almacenar métricas
+        Route::post('/{type}', [MetricasController::class, 'store'])
+            ->whereIn('type', ['deployment', 'leadtime', 'deployment-result', 'incident']);
+
+        // Resolver incidentes (MTTR)
+        Route::post('/incident/resolve', [MetricasController::class, 'resolveIncident']);
+
+        // Consultar métricas DORA
+        Route::get('/dora', [MetricasController::class, 'getDORAMetrics']);
+
+        // Comparar GitHub Actions vs Jenkins
+        Route::get('/comparison', [MetricasController::class, 'getComparison']);
+    });
+
+// Ruta de prueba (sin autenticación)
+Route::get('/ping', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now()->toDateTimeString(),
+    ]);
 });

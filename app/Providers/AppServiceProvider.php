@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
+  use Illuminate\Support\Facades\URL;
+
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -17,16 +19,11 @@ class AppServiceProvider extends ServiceProvider
     /**
      * Bootstrap any application services.
      */
-    public function boot(): void
-    {
-        //
 
-        // view()->share([
-        //     'categorias'=>$categorias,
-        //     'productos'=>$productos,
-        //     'empresa'=> $empresa,
-        //     'colores'=>$colores,
-        //     'productoscount'=>$productoscount
-        // ]);
+    public function boot()
+    {
+        if (app()->environment('local')) {
+            URL::forceScheme('https');
+        }
     }
 }

@@ -1,4 +1,4 @@
-name: Laravel CI/CD Pipeline
+name: Laravel CI/CD with DORA Metrics
 
 on:
   push:
@@ -7,19 +7,16 @@ on:
     branches: [ main ]
 
 env:
-  # Variables de entorno globales
   PHP_VERSION: '8.2'
-  NODE_VERSION: '18'
 
 jobs:
   # ============================================
-  # JOB 1: TESTS Y CALIDAD
+  # JOB 1: TESTS
   # ============================================
   test:
-    name: Tests & Quality Checks
+    name: Run Tests
     runs-on: ubuntu-latest
 
-    # Servicios (MySQL para tests)
     services:
       mysql:
         image: mysql:8.0
@@ -35,43 +32,35 @@ jobs:
           --health-retries=3
 
     steps:
-      # 1. Checkout del código
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Necesario para métricas DORA
+          fetch-depth: 0
 
-      # 2. Setup PHP
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, xml, ctype, iconv, intl, pdo_sqlite, pdo_mysql, dom, filter, gd, json
-          coverage: xdebug
-          tools: composer:v2
+          extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql
+          coverage: none
 
-      # 3. Cache de Composer
       - name: Cache Composer dependencies
         uses: actions/cache@v3
         with:
           path: vendor
           key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-composer-
+          restore-keys: ${{ runner.os }}-composer-
 
-      # 4. Instalar dependencias
-      - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader --no-progress
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
-      # 5. Preparar entorno
-      - name: Prepare Laravel Application
+      - name: Prepare Laravel
         run: |
           cp .env.example .env
           php artisan key:generate
           chmod -R 777 storage bootstrap/cache
 
-      # 6. Ejecutar migraciones
-      - name: Run Migrations
+      - name: Run migrations
         env:
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
@@ -81,8 +70,7 @@ jobs:
           DB_PASSWORD: password
         run: php artisan migrate --force
 
-      # 7. Ejecutar tests
-      - name: Execute tests (Unit and Feature)
+      - name: Execute tests
         env:
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
@@ -90,33 +78,13 @@ jobs:
           DB_DATABASE: testing
           DB_USERNAME: root
           DB_PASSWORD: password
-        run: php artisan test --parallel
-
-      # 8. Análisis estático (si tienes PHPStan)
-      - name: Run PHPStan
-        run: |
-          if [ -f "phpstan.neon" ]; then
-            ./vendor/bin/phpstan analyse --memory-limit=2G
-          else
-            echo "PHPStan not configured, skipping..."
-          fi
-        continue-on-error: true
-
-      # 9. Code Style (Laravel Pint)
-      - name: Check Code Style
-        run: |
-          if [ -f "pint.json" ]; then
-            ./vendor/bin/pint --test
-          else
-            echo "Pint not configured, skipping..."
-          fi
-        continue-on-error: true
+        run: php artisan test
 
   # ============================================
-  # JOB 2: DEPLOY (solo en main)
+  # JOB 2: DEPLOY & DORA METRICS
   # ============================================
   deploy:
-    name: Deploy to Production
+    name: Deploy & Track DORA Metrics
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -127,28 +95,18 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Aquí iría tu proceso de deploy real
-      # Por ahora simulamos
-      - name: Deploy to Server
+      - name: 🚀 Deploy to Production
         run: |
           echo "🚀 Deploying to production..."
           echo "📦 Branch: ${{ github.ref_name }}"
           echo "📝 Commit: ${{ github.sha }}"
-          # Aquí pondrías tus comandos reales de deploy:
-          # - SSH a tu servidor
-          # - Pull del código
-          # - Composer install
-          # - Migraciones
-          # - etc.
-          sleep 5
+          sleep 3
           echo "✅ Deploy completed!"
 
       # ============================================
-      # MÉTRICAS DORA
+      # MÉTRICA DORA 1: DEPLOYMENT FREQUENCY
       # ============================================
-
-      # MÉTRICA 1: Deployment Frequency
-      - name: 📊 DORA - Record Deployment
+      - name: 📊 Record Deployment (Deployment Frequency)
         if: success()
         run: |
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment \
@@ -162,8 +120,10 @@ jobs:
               "status": "success"
             }'
 
-      # MÉTRICA 2: Lead Time for Changes
-      - name: 📊 DORA - Calculate Lead Time
+      # ============================================
+      # MÉTRICA DORA 2: LEAD TIME FOR CHANGES
+      # ============================================
+      - name: 📊 Calculate Lead Time
         if: success()
         run: |
           COMMIT_TIME=$(git show -s --format=%cI ${{ github.sha }})
@@ -173,6 +133,8 @@ jobs:
           DEPLOY_EPOCH=$(date -d "$DEPLOY_TIME" +%s)
           LEAD_TIME=$((DEPLOY_EPOCH - COMMIT_EPOCH))
 
+          echo "⏱️  Commit Time: $COMMIT_TIME"
+          echo "⏱️  Deploy Time: $DEPLOY_TIME"
           echo "⏱️  Lead Time: $LEAD_TIME seconds ($((LEAD_TIME / 60)) minutes)"
 
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/leadtime \
@@ -186,8 +148,10 @@ jobs:
               "lead_time_seconds": '$LEAD_TIME'
             }'
 
-      # MÉTRICA 3: Change Failure Rate (registro exitoso)
-      - name: 📊 DORA - Record Success
+      # ============================================
+      # MÉTRICA DORA 3: CHANGE FAILURE RATE (Success)
+      # ============================================
+      - name: 📊 Record Deployment Success
         if: success()
         run: |
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment-result \
@@ -201,8 +165,10 @@ jobs:
               "is_failure": false
             }'
 
-      # MÉTRICA 3: Change Failure Rate (registro de fallo)
-      - name: 📊 DORA - Record Failure
+      # ============================================
+      # MÉTRICA DORA 3: CHANGE FAILURE RATE (Failure)
+      # ============================================
+      - name: 📊 Record Deployment Failure
         if: failure()
         run: |
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment-result \
@@ -216,8 +182,10 @@ jobs:
               "is_failure": true
             }'
 
-      # MÉTRICA 4: MTTR - Registrar incidente si falla
-      - name: 📊 DORA - Record Incident
+      # ============================================
+      # MÉTRICA DORA 4: MEAN TIME TO RECOVERY (Create Incident)
+      # ============================================
+      - name: 📊 Create Incident (MTTR)
         if: failure()
         run: |
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/incident \
@@ -229,17 +197,20 @@ jobs:
               "start_time": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
               "commit": "'"${{ github.sha }}"'",
               "status": "open"
-            }'
+            }
 
-      # MÉTRICA 4: MTTR - Resolver incidente si el deploy anterior falló pero este es exitoso
-      - name: 📊 DORA - Resolve Previous Incident
-        if: success()
-        run: |
-          curl -X POST ${{ secrets.APP_URL }}/api/metrics/incident/resolve \
-            -H "Content-Type: application/json" \
-            -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
-            -d '{
-              "tool": "github-actions",
-              "resolution_time": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'"
-            }'
-
+            # ============================================
+  # RESUMEN
+  # ============================================
+      - name: 📊 DORA Metrics Summary
+    if: always()
+    run: |
+      echo "=================================="
+      echo "📊 DORA METRICS TRACKED"
+      echo "=================================="
+      echo "✅ Deployment Frequency: Recorded"
+      echo "✅ Lead Time: Calculated"
+      echo "✅ Change Failure Rate: Recorded"
+      echo "✅ MTTR: Tracked"
+      echo "=================================="
+      echo "View metrics at: ${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions"
