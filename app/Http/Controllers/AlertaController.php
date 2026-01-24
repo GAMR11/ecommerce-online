@@ -26,8 +26,8 @@ class AlertaController extends Controller
      */
     public function sendSMS()
     {
-        $this->twilio->sendSms('+593988703045', 'Mensaje numero 2 desde twilio');
-        dd("mensaje enviado");
+        // $this->twilio->sendSms('+593988703045', 'Mensaje numero 2 desde twilio');
+        // dd("mensaje enviado");
         // $categorias = Categoria::all();
         // return view('categoria.categoria-table',compact('categorias'));
     }
