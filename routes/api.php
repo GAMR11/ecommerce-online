@@ -9,7 +9,7 @@ use App\Http\Controllers\MetricasController;
 // ============================================
 
 Route::prefix('metrics')
-    // ->middleware('metrics.api')
+    ->middleware('metrics.api')
     ->group(function () {
 
         // Almacenar métricas

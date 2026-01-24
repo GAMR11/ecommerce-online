@@ -109,7 +109,7 @@ jobs:
       - name: 📊 Record Deployment (Deployment Frequency)
         if: success()
         run: |
-          curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment \
+          curl -i -X POST ${{ secrets.APP_URL }}/api/metrics/deployment \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
