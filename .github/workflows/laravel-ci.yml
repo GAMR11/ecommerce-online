@@ -2,9 +2,9 @@ name: Laravel CI/CD with DORA Metrics
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ master ]
   pull_request:
-    branches: [ main ]
+    branches: [ master ]
 
 env:
   PHP_VERSION: '8.2'
@@ -87,7 +87,7 @@ jobs:
     name: Deploy & Track DORA Metrics
     needs: test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
 
     steps:
       - name: Checkout code
