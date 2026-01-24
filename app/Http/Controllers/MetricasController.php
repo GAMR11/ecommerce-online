@@ -19,7 +19,7 @@ class MetricasController extends Controller
      */
     public function store(Request $request, string $type)
     {
-        var_dump($request->all());
+        // var_dump($request->all());
         $validator = Validator::make($request->all(), [
             // 'tool' => 'required|in:github-actions,jenkins',
             'timestamp' => 'nullable|date',
