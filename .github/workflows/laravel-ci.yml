@@ -199,18 +199,18 @@ jobs:
               "status": "open"
             }
 
-            # ============================================
-  # RESUMEN
-  # ============================================
+        # ============================================
+        # RESUMEN
+        # ============================================
       - name: 📊 DORA Metrics Summary
-    if: always()
-    run: |
-      echo "=================================="
-      echo "📊 DORA METRICS TRACKED"
-      echo "=================================="
-      echo "✅ Deployment Frequency: Recorded"
-      echo "✅ Lead Time: Calculated"
-      echo "✅ Change Failure Rate: Recorded"
-      echo "✅ MTTR: Tracked"
-      echo "=================================="
-      echo "View metrics at: ${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions"
+        if: always()
+        run: |
+          echo "=================================="
+          echo "📊 DORA METRICS TRACKED"
+          echo "=================================="
+          echo "✅ Deployment Frequency: Recorded"
+          echo "✅ Lead Time: Calculated"
+          echo "✅ Change Failure Rate: Recorded"
+          echo "✅ MTTR: Tracked"
+          echo "=================================="
+          echo "View metrics at: ${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions"
