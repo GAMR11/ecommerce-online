@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<factura id="comprobante" version="1.0.0">
+  <infoTributaria>
+    <ambiente>1</ambiente>
+    <tipoEmision>1</tipoEmision>
+    <razonSocial>Comercial Gusmor S.A.</razonSocial>
+    <ruc>0101516904001</ruc>
+    <claveAcceso>2112202401010151690400110030030000007891234567812</claveAcceso>
+    <codDoc>01</codDoc>
+    <estab>003</estab>
+    <ptoEmi>003</ptoEmi>
+    <secuencial>000000789</secuencial>
+    <dirMatriz>Av. Principal y Calle Secundaria</dirMatriz>
+  </infoTributaria>
+  <infoFactura>
+    <fechaEmision>21/12/2024</fechaEmision>
+    <dirEstablecimiento>Av. Secundaria y Tercera Calle</dirEstablecimiento>
+    <obligadoContabilidad>SI</obligadoContabilidad>
+    <tipoIdentificacionComprador>05</tipoIdentificacionComprador>
+    <razonSocialComprador>Juan Pérez</razonSocialComprador>
+    <identificacionComprador>0501234567</identificacionComprador>
+    <totalSinImpuestos>4.46</totalSinImpuestos>
+    <totalDescuento>0.00</totalDescuento>
+    <totalConImpuestos>
+      <totalImpuesto>
+        <codigo>2</codigo>
+        <codigoPorcentaje>2</codigoPorcentaje>
+        <baseImponible>4.46</baseImponible>
+        <valor>0.54</valor>
+      </totalImpuesto>
+    </totalConImpuestos>
+    <propina>0.00</propina>
+    <importeTotal>5.00</importeTotal>
+    <moneda>DOLAR</moneda>
+  </infoFactura>
+  <detalles>
+    <detalle>
+      <codigoPrincipal>001</codigoPrincipal>
+      <descripcion>Producto A</descripcion>
+      <cantidad>1</cantidad>
+      <precioUnitario>4.46</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>4.46</precioTotalSinImpuesto>
+      <impuestos>
+        <impuesto>
+          <codigo>2</codigo>
+          <codigoPorcentaje>2</codigoPorcentaje>
+          <tarifa>12</tarifa>
+          <baseImponible>4.46</baseImponible>
+          <valor>0.54</valor>
+        </impuesto>
+      </impuestos>
+    </detalle>
+  </detalles>
+</factura>

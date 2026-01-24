@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<factura id="comprobante" version="1.0.0">
+  <infoTributaria>
+    <ambiente>1</ambiente>
+    <tipoEmision>1</tipoEmision>
+    <razonSocial>Comercial Gusmor S.A.</razonSocial>
+    <ruc>0101516904001</ruc>
+    <claveAcceso>2112202401010151690400110030030000007891234567812</claveAcceso>
+    <codDoc>01</codDoc>
+    <estab>003</estab>
+    <ptoEmi>003</ptoEmi>
+    <secuencial>000000789</secuencial>
+    <dirMatriz>Av. Principal y Calle Secundaria</dirMatriz>
+  </infoTributaria>
+  <infoFactura>
+    <fechaEmision>21/12/2024</fechaEmision>
+    <dirEstablecimiento>Av. Secundaria y Tercera Calle</dirEstablecimiento>
+    <obligadoContabilidad>SI</obligadoContabilidad>
+    <tipoIdentificacionComprador>05</tipoIdentificacionComprador>
+    <razonSocialComprador>Juan Pérez</razonSocialComprador>
+    <identificacionComprador>0501234567</identificacionComprador>
+    <totalSinImpuestos>4.46</totalSinImpuestos>
+    <totalDescuento>0.00</totalDescuento>
+    <totalConImpuestos>
+      <totalImpuesto>
+        <codigo>2</codigo>
+        <codigoPorcentaje>2</codigoPorcentaje>
+        <baseImponible>4.46</baseImponible>
+        <valor>0.54</valor>
+      </totalImpuesto>
+    </totalConImpuestos>
+    <propina>0.00</propina>
+    <importeTotal>5.00</importeTotal>
+    <moneda>DOLAR</moneda>
+  </infoFactura>
+  <detalles>
+    <detalle>
+      <codigoPrincipal>001</codigoPrincipal>
+      <descripcion>Producto A</descripcion>
+      <cantidad>1</cantidad>
+      <precioUnitario>4.46</precioUnitario>
+      <descuento>0.00</descuento>
+      <precioTotalSinImpuesto>4.46</precioTotalSinImpuesto>
+      <impuestos>
+        <impuesto>
+          <codigo>2</codigo>
+          <codigoPorcentaje>2</codigoPorcentaje>
+          <tarifa>12</tarifa>
+          <baseImponible>4.46</baseImponible>
+          <valor>0.54</valor>
+        </impuesto>
+      </impuestos>
+    </detalle>
+  </detalles>
+<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+  <ds:SignedInfo><ds:CanonicalizationMethod Algorithm="http://www.w3.org/TR/2001/REC-xml-c14n-20010315"/>
+    <ds:SignatureMethod Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+  <ds:Reference><ds:Transforms><ds:Transform Algorithm="http://www.w3.org/2000/09/xmldsig#enveloped-signature"/></ds:Transforms><ds:DigestMethod Algorithm="http://www.w3.org/2000/09/xmldsig#sha1"/><ds:DigestValue>snpF6WNwKsZGnfsoatIWqVYuywE=</ds:DigestValue></ds:Reference></ds:SignedInfo><ds:SignatureValue>dsN2Mk8j9t634u7/+1H87Ium3hePjFj5IvJZqhFkl6M80ZSnwQx2BHfpqtTGRS7R68rN6MSEdTJHCjJYDsl0JWs8t09m/uOaAFLxIFKoDnZ0U4OkTL6B8h/YPgxYG1JATXsgzrjRF2ulwBLuH9C7B56m/Om3K9plkxy9pVivuzse4oaST/M6dnoEdaL8XPahSQ0TQ1wbv1e4VTiztzAWAkIXqxOrTF6In5TcRZcDcum4BenGFsrFflTpkpJa96OdB7beiXGp1KQ/At/oZIgMjXyu6zG+aWjwFomCDkEGNnAOgaTA2WLrrm/nStuQUXnB8arT2mK2Yj452jXeeZZ3AA==</ds:SignatureValue>
+<ds:KeyInfo><ds:X509Data><ds:X509Certificate>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</ds:X509Certificate></ds:X509Data></ds:KeyInfo></ds:Signature></factura>
