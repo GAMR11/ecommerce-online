@@ -13,6 +13,7 @@ pipeline {
         stage('Checkout & Info') {
             steps {
                 script {
+                    // Obtenemos el SHA de forma robusta
                     env.GIT_COMMIT_SHA = bat(script: "git rev-parse HEAD", returnStdout: true).trim().split('\r\n').last()
                 }
             }
@@ -20,10 +21,8 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo "📦 Instalando dependencias de Composer..."
-                // Instalamos vendor para que artisan test funcione
+                echo "📦 Instalando dependencias..."
                 bat 'composer install --no-interaction --prefer-dist'
-                // Creamos el archivo .env si no existe y generamos llave
                 bat 'copy .env.example .env /Y'
                 bat 'php artisan key:generate'
             }
@@ -31,7 +30,8 @@ pipeline {
 
         stage('Run Tests') {
             steps {
-                echo "🧪 Ejecutando tests unitarios..."
+                echo "🧪 Ejecutando tests..."
+                // Si esto falla, saltará directamente al bloque 'post { failure }'
                 bat 'php artisan test'
             }
         }
@@ -39,33 +39,50 @@ pipeline {
         stage('Deploy & Track DORA') {
             steps {
                 script {
-                    echo "🚀 Desplegando en producción (Simulado)..."
-                    sleep 3
+                    echo "🚀 Desplegando y registrando éxito..."
                     def deployTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
 
-                    def deployData = JsonOutput.toJson([tool: TOOL_NAME, timestamp: deployTime, commit: env.GIT_COMMIT_SHA, status: "success"])
+                    // 1. Registro de Despliegue Exitoso (Frecuencia de Despliegue)
+                    def deployData = JsonOutput.toJson([
+                        tool: TOOL_NAME,
+                        timestamp: deployTime,
+                        commit: env.GIT_COMMIT_SHA,
+                        status: "success"
+                    ])
                     bat "curl -X POST ${APP_URL}/api/metrics/deployment -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${deployData.replace('"', '\\"')}\""
 
+                    // 2. Registro de Lead Time (Tiempo de Entrega)
                     bat "curl -X POST ${APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"{\\\"tool\\\": \\\"${TOOL_NAME}\\\", \\\"commit\\\": \\\"${env.GIT_COMMIT_SHA}\\\", \\\"lead_time_seconds\\\": 300}\""
+
+                    // 3. Registro de Restauración (MTTR): Notificamos que si había un incidente previo, este despliegue lo cerró
+                    def recoveryData = JsonOutput.toJson([tool: TOOL_NAME, status: "resolved", end_time: deployTime])
+                    bat "curl -X POST ${APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${recoveryData.replace('"', '\\"')}\""
                 }
             }
         }
     }
 
     post {
-        always {
-            script {
-                // Verificamos si Ngrok está activo antes de terminar
-                echo "Verificando conexión con: ${APP_URL}"
-            }
-        }
         failure {
             script {
-                def failData = JsonOutput.toJson([tool: TOOL_NAME, status: "failure", is_failure: true])
+                echo "❌ El pipeline falló. Registrando incidente..."
                 def incidentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                def incidentData = JsonOutput.toJson([tool: TOOL_NAME, start_time: incidentTime, status: "open"])
 
-                bat "curl -X POST ${APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${failData.replace('"', '\\"')}\""
+                // 4. Registro de Fallo (Change Failure Rate)
+                def failData = JsonOutput.toJson([
+                    tool: TOOL_NAME,
+                    commit: env.GIT_COMMIT_SHA,
+                    status: "failure"
+                ])
+                bat "curl -X POST ${APP_URL}/api/metrics/deployment -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${failData.replace('"', '\\"')}\""
+
+                // 5. Registro de Incidente Abierto (Time to Restore)
+                def incidentData = JsonOutput.toJson([
+                    tool: TOOL_NAME,
+                    start_time: incidentTime,
+                    status: "open",
+                    description: "Pipeline failed in stage: ${env.STAGE_NAME}"
+                ])
                 bat "curl -X POST ${APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${incidentData.replace('"', '\\"')}\""
             }
         }
