@@ -1,5 +1,12 @@
 [phases.setup]
-nixPkgs = ['php82', 'php82Packages.composer']
+nixPkgs = ['php82', 'php82Packages.composer', 'nodejs_20', 'npm-9_x']
+
+[phases.build]
+cmds = [
+    'composer install --no-dev --optimize-autoloader --ignore-platform-reqs',
+    'npm ci',
+    'npm run build'
+]
 
 [start]
-cmd = 'bash railway.sh'
+cmd = 'php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=$PORT'
