@@ -13,16 +13,16 @@ pipeline {
         stage('Checkout & Info') {
             steps {
                 script {
-                    env.GIT_COMMIT_SHA = sh(script: 'git rev-parse HEAD', returnStdout: true).trim()
-                    env.COMMIT_TIME = sh(script: "git show -s --format=%cI ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
+                    // Obtenemos el SHA del commit usando comandos de Windows
+                    env.GIT_COMMIT_SHA = bat(script: "git rev-parse HEAD", returnStdout: true).trim().split('\r\n').last()
                 }
             }
         }
 
         stage('Run Tests') {
             steps {
-                echo "🧪 Ejecutando tests unitarios..."
-                // Usamos bat para Windows, si falla el pipeline irá a 'failure'
+                echo "🧪 Ejecutando tests unitarios en Windows..."
+                // Usamos 'bat' para ejecutar PHP en Windows
                 bat 'php artisan test'
             }
         }
@@ -36,11 +36,11 @@ pipeline {
 
                     // 1. Métrica: Deployment Frequency
                     def deployData = JsonOutput.toJson([tool: TOOL_NAME, timestamp: deployTime, commit: env.GIT_COMMIT_SHA, status: "success"])
-                    sh "curl -X POST ${APP_URL}/api/metrics/deployment -H 'Content-Type: application/json' -H 'X-API-Key: ${METRICS_API_KEY}' -d '${deployData}'"
+                    // Usamos bat y comillas dobles escapadas para el JSON en Windows
+                    bat "curl -X POST ${APP_URL}/api/metrics/deployment -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${deployData.replace('"', '\\"')}\""
 
-                    // 2. Métrica: Lead Time for Changes
-                    // Cálculo simplificado en Groovy
-                    sh "curl -X POST ${APP_URL}/api/metrics/leadtime -H 'Content-Type: application/json' -H 'X-API-Key: ${METRICS_API_KEY}' -d '{\"tool\": \"${TOOL_NAME}\", \"commit\": \"${env.GIT_COMMIT_SHA}\", \"lead_time_seconds\": 300}'"
+                    // 2. Métrica: Lead Time for Changes (Simplificado para pruebas)
+                    bat "curl -X POST ${APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"{\\\"tool\\\": \\\"${TOOL_NAME}\\\", \\\"commit\\\": \\\"${env.GIT_COMMIT_SHA}\\\", \\\"lead_time_seconds\\\": 300}\""
                 }
             }
         }
@@ -50,7 +50,7 @@ pipeline {
         success {
             script {
                 def successData = JsonOutput.toJson([tool: TOOL_NAME, status: "success", is_failure: false])
-                sh "curl -X POST ${APP_URL}/api/metrics/deployment-result -H 'Content-Type: application/json' -H 'X-API-Key: ${METRICS_API_KEY}' -d '${successData}'"
+                bat "curl -X POST ${APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${successData.replace('"', '\\"')}\""
             }
         }
         failure {
@@ -59,8 +59,8 @@ pipeline {
                 def incidentTime = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
                 def incidentData = JsonOutput.toJson([tool: TOOL_NAME, start_time: incidentTime, status: "open"])
 
-                sh "curl -X POST ${APP_URL}/api/metrics/deployment-result -H 'Content-Type: application/json' -H 'X-API-Key: ${METRICS_API_KEY}' -d '${failData}'"
-                sh "curl -X POST ${APP_URL}/api/metrics/incident -H 'Content-Type: application/json' -H 'X-API-Key: ${METRICS_API_KEY}' -d '${incidentData}'"
+                bat "curl -X POST ${APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${failData.replace('"', '\\"')}\""
+                bat "curl -X POST ${APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${incidentData.replace('"', '\\"')}\""
             }
         }
     }
