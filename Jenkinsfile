@@ -7,6 +7,8 @@ pipeline {
         METRICS_API_KEY = credentials('METRICS_API_KEY')
         APP_URL         = credentials('APP_URL')
         TOOL_NAME       = 'jenkins'
+        // AJUSTA ESTA RUTA A DONDE ESTÁ TU PHP 8.2
+        PHP_BIN         = "C:\\php\\php.exe"
     }
 
     stages {
@@ -14,43 +16,37 @@ pipeline {
             steps {
                 script {
                     echo "📦 Checking out code..."
+                    // Verificamos qué versión de PHP ve Jenkins realmente
+                    bat "@echo off & ${env.PHP_BIN} -v"
 
-                    // Capturamos el SHA
                     env.GIT_COMMIT_SHA = bat(script: "@echo off & git rev-parse HEAD", returnStdout: true).trim()
-
-                    // CORRECCIÓN PARA WINDOWS: Usamos %% para escapar el símbolo de porcentaje
-                    // Esto evita el error "invalid --pretty format"
                     def commitTimestamp = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
-
-                    // Si por alguna razón sigue fallando, usamos el tiempo actual como fallback para no detener el pipeline
                     long commitSeconds = commitTimestamp.isNumber() ? commitTimestamp.toLong() : (System.currentTimeMillis() / 1000)
-
                     env.COMMIT_TIME = new Date(commitSeconds * 1000).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-
-                    // Tiempos del pipeline
-                    env.PIPELINE_START_TIME = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
-                    long startEpoch = (long) (System.currentTimeMillis() / 1000)
-                    env.PIPELINE_START_EPOCH = startEpoch.toString()
-
-                    echo "📝 Commit SHA: ${env.GIT_COMMIT_SHA}"
-                    echo "⏱️ Commit Time: ${env.COMMIT_TIME}"
+                    env.PIPELINE_START_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
                 }
             }
         }
 
         stage('Install Dependencies') {
             steps {
-                echo "📦 Installing dependencies..."
-                bat 'composer install --no-interaction --prefer-dist --optimize-autoloader'
-                bat 'copy .env.example .env /Y'
-                bat 'php artisan key:generate'
+                echo "📦 Installing dependencies forcing PHP 8.2 path..."
+                script {
+                    // Ejecutamos Composer usando el ejecutable de PHP 8.2 específicamente
+                    // Nota: Si 'composer' no funciona solo, usa la ruta completa al .phar o al .bat de composer
+                    bat "${env.PHP_BIN} \"C:\\ProgramData\\ComposerSetup\\bin\\composer.phar\" install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs"
+
+                    bat "copy .env.example .env /Y"
+                    bat "${env.PHP_BIN} artisan key:generate"
+                }
             }
         }
 
         stage('Run Tests') {
             steps {
                 echo "🧪 Running tests..."
-                bat 'php artisan test'
+                // Usamos el PHP_BIN definido arriba
+                bat "${env.PHP_BIN} artisan test"
             }
         }
 
@@ -60,32 +56,23 @@ pipeline {
                     echo "🚀 Deploying to Railway..."
                     env.DEPLOY_START_TIME = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
 
-                    def maxAttempts = 30
-                    def attempt = 0
+                    def maxAttempts = 20
                     def deploySuccess = false
+                    def attempt = 0
 
                     while (attempt < maxAttempts && !deploySuccess) {
                         attempt++
                         try {
-                            // En Windows, curl dentro de bat necesita escapar los % del formato
-                            def response = bat(
-                                script: "@echo off & curl -s -o nul -w \"%%{http_code}\" ${APP_URL}/api/ping",
-                                returnStdout: true
-                            ).trim()
-
+                            def response = bat(script: "@echo off & curl -s -o nul -w \"%%{http_code}\" ${APP_URL}/api/ping", returnStdout: true).trim()
                             if (response.contains("200")) {
-                                echo "✅ Railway deployment is live!"
                                 deploySuccess = true
                                 env.DEPLOY_END_TIME = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
                                 env.DEPLOY_END_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
                             } else {
                                 echo "⏳ Attempt ${attempt}/${maxAttempts} - HTTP ${response}..."
-                                sleep(5)
+                                sleep(10)
                             }
-                        } catch (Exception e) {
-                            echo "⚠️ Connection failed, retrying..."
-                            sleep(5)
-                        }
+                        } catch (e) { sleep(10) }
                     }
                     if (!deploySuccess) error("❌ Deployment verification failed")
                 }
@@ -96,12 +83,9 @@ pipeline {
             steps {
                 script {
                     echo "📊 Recording DORA Metrics..."
-
-                    // Obtenemos el timestamp del commit de nuevo con el escape corregido///
-                    def commitTs = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
-                    long commitEpoch = commitTs.isNumber() ? commitTs.toLong() : 0
-                    long deployEpoch = env.DEPLOY_END_EPOCH ? env.DEPLOY_END_EPOCH.toLong() : 0
-                    long leadTimeSeconds = (deployEpoch > 0 && commitEpoch > 0) ? (deployEpoch - commitEpoch) : 0
+                    long commitEpoch = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim().toLong()
+                    long deployEpoch = env.DEPLOY_END_EPOCH.toLong()
+                    long leadTimeSeconds = deployEpoch - commitEpoch
 
                     def leadTimeData = JsonOutput.toJson([
                         tool: TOOL_NAME,
@@ -110,9 +94,7 @@ pipeline {
                         deploy_time: env.DEPLOY_END_TIME,
                         lead_time_seconds: leadTimeSeconds
                     ])
-
                     bat "curl -X POST ${APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${leadTimeData.replace('"', '\\"')}\""
-                    echo "✅ Metrics recorded."
                 }
             }
         }
@@ -131,11 +113,6 @@ pipeline {
                     is_failure: true
                 ])
                 bat "curl -X POST ${APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -H \"X-API-Key: ${METRICS_API_KEY}\" -d \"${failData.replace('"', '\\"')}\""
-            }
-        }
-        always {
-            script {
-                echo "🏁 Pipeline finished."
             }
         }
     }
