@@ -97,7 +97,7 @@ pipeline {
                 script {
                     echo "📊 Recording DORA Metrics..."
 
-                    // Obtenemos el timestamp del commit de nuevo con el escape corregido//
+                    // Obtenemos el timestamp del commit de nuevo con el escape corregido///
                     def commitTs = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
                     long commitEpoch = commitTs.isNumber() ? commitTs.toLong() : 0
                     long deployEpoch = env.DEPLOY_END_EPOCH ? env.DEPLOY_END_EPOCH.toLong() : 0
