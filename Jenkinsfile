@@ -11,7 +11,7 @@ pipeline {
 
     stages {
         // ============================================
-        // STAGE 1: CHECKOUT & CAPTURE START TIME
+        // STAGE 1: CHECKOUT & CAPTURE START TIME //
         // ============================================
         stage('Checkout & Info') {
             steps {
