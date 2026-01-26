@@ -13,7 +13,7 @@ class UserSeeder extends Seeder
      */
     public function run(): void
     {
-        User::create(
+        User::firstOrCreate(
             [
                 'name'=>'Gustavo Morales',
                 'email'=>'gamr21@outlook.es',
@@ -21,7 +21,8 @@ class UserSeeder extends Seeder
             ]
         );
 
-        User::create(
+
+        User::firstOrCreate(
             [
                 'name'=>'Jaime Morales',
                 'email'=>'comercialgusmor@gmail.com',
@@ -29,7 +30,7 @@ class UserSeeder extends Seeder
             ]
         );
 
-        User::create(
+        User::firstOrCreate(
             [
                 'name'=>'Melanie Lemarie',
                 'email'=>'melanielemarie@gmail.com',

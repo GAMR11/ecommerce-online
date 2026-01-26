@@ -14,30 +14,30 @@ class CategoriaSeeder extends Seeder
     public function run(): void
     {
         //
-        Categoria::create(["nombre"=>"Moto",'descripcion'=>'Motos prácticas para un transporte rápido y eficiente en la ciudad.']);
-        Categoria::create(["nombre"=>"Motocicleta",'descripcion'=>'Motocicletas potentes para una experiencia de conducción segura y cómoda.']);
-        Categoria::create(["nombre"=>"Pasola",'descripcion'=>'Pasolas ideales para desplazamientos cortos y económicos.']);
-        Categoria::create(["nombre"=>"Vitrina Frigorifica",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Lavadora Digital",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Lavadora Manual",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Secadora Digital",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Televisor",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Licuadora",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Tostadora",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Microondas",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Horno",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Cocina",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Ropero",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Congelador",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Espejo",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Minibar",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Nevera",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Ventilador",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Caja de sonido",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Bicicleta",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Patineta",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Monopatin",'descripcion'=>'']);
-        Categoria::create(["nombre"=>"Celular",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Moto",'descripcion'=>'Motos prácticas para un transporte rápido y eficiente en la ciudad.']);
+        Categoria::firstOrCreate(["nombre"=>"Motocicleta",'descripcion'=>'Motocicletas potentes para una experiencia de conducción segura y cómoda.']);
+        Categoria::firstOrCreate(["nombre"=>"Pasola",'descripcion'=>'Pasolas ideales para desplazamientos cortos y económicos.']);
+        Categoria::firstOrCreate(["nombre"=>"Vitrina Frigorifica",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Lavadora Digital",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Lavadora Manual",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Secadora Digital",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Televisor",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Licuadora",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Tostadora",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Microondas",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Horno",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Cocina",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Ropero",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Congelador",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Espejo",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Minibar",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Nevera",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Ventilador",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Caja de sonido",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Bicicleta",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Patineta",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Monopatin",'descripcion'=>'']);
+        Categoria::firstOrCreate(["nombre"=>"Celular",'descripcion'=>'']);
 
 
 
