@@ -7,8 +7,8 @@ pipeline {
         METRICS_API_KEY = credentials('METRICS_API_KEY')
         APP_URL         = credentials('APP_URL')
         TOOL_NAME       = 'jenkins'
-        // AJUSTA ESTA RUTA A DONDE ESTÁ TU PHP 8.2
-        PHP_BIN         = "C:\\php\\php.exe"
+        // RUTA FORZADA BASADA EN TU COMAND "WHERE"
+        PHP_BIN         = "C:\\laragon\\bin\\php\\php-8.2.30-nts-Win32-vs16-x64\\php.exe"
     }
 
     stages {
@@ -16,8 +16,8 @@ pipeline {
             steps {
                 script {
                     echo "📦 Checking out code..."
-                    // Verificamos qué versión de PHP ve Jenkins realmente
-                    bat "@echo off & ${env.PHP_BIN} -v"
+                    // Validamos que la ruta existe
+                    bat "@echo off & if exist \"${env.PHP_BIN}\" (echo ✅ PHP 8.2 encontrado) else (echo ❌ No se encuentra el archivo en la ruta especificada)"
 
                     env.GIT_COMMIT_SHA = bat(script: "@echo off & git rev-parse HEAD", returnStdout: true).trim()
                     def commitTimestamp = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
@@ -30,14 +30,14 @@ pipeline {
 
         stage('Install Dependencies') {
             steps {
-                echo "📦 Installing dependencies forcing PHP 8.2 path..."
+                echo "📦 Installing dependencies with PHP 8.2..."
                 script {
-                    // Ejecutamos Composer usando el ejecutable de PHP 8.2 específicamente
-                    // Nota: Si 'composer' no funciona solo, usa la ruta completa al .phar o al .bat de composer
-                    bat "${env.PHP_BIN} \"C:\\ProgramData\\ComposerSetup\\bin\\composer.phar\" install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs"
+                    // Usamos PHP 8.2 para ejecutar composer
+                    // Nota: Usamos --ignore-platform-reqs por si te falta alguna extensión activa en el php.ini de Laragon
+                    bat "\"${env.PHP_BIN}\" \"C:\\ProgramData\\ComposerSetup\\bin\\composer.phar\" install --no-interaction --prefer-dist --optimize-autoloader --ignore-platform-reqs"
 
-                    bat "copy .env.example .env /Y"
-                    bat "${env.PHP_BIN} artisan key:generate"
+                    bat "if not exist .env copy .env.example .env"
+                    bat "\"${env.PHP_BIN}\" artisan key:generate"
                 }
             }
         }
@@ -45,18 +45,17 @@ pipeline {
         stage('Run Tests') {
             steps {
                 echo "🧪 Running tests..."
-                // Usamos el PHP_BIN definido arriba
-                bat "${env.PHP_BIN} artisan test"
+                bat "\"${env.PHP_BIN}\" artisan test"
             }
         }
 
         stage('Deploy to Railway') {
             steps {
                 script {
-                    echo "🚀 Deploying to Railway..."
+                    echo "🚀 Deploying to Railway (Verification)..."
                     env.DEPLOY_START_TIME = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
 
-                    def maxAttempts = 20
+                    def maxAttempts = 15
                     def deploySuccess = false
                     def attempt = 0
 
@@ -68,13 +67,16 @@ pipeline {
                                 deploySuccess = true
                                 env.DEPLOY_END_TIME = new Date().format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
                                 env.DEPLOY_END_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
+                                echo "✅ Deploy verificado con éxito."
                             } else {
-                                echo "⏳ Attempt ${attempt}/${maxAttempts} - HTTP ${response}..."
-                                sleep(10)
+                                echo "⏳ Intento ${attempt}/${maxAttempts}: Esperando 200 (Recibido: ${response})..."
+                                sleep(15)
                             }
-                        } catch (e) { sleep(10) }
+                        } catch (e) {
+                            sleep(15)
+                        }
                     }
-                    if (!deploySuccess) error("❌ Deployment verification failed")
+                    if (!deploySuccess) error("❌ Railway no respondió a tiempo.")
                 }
             }
         }
