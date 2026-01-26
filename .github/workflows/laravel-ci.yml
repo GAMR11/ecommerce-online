@@ -1,4 +1,4 @@
-name: Laravel CI/CD with DORA Metrics
+name: Laravel CI/CD with DORA Metrics & Railway Deploy
 
 on:
   push:
@@ -81,10 +81,10 @@ jobs:
         run: php artisan test
 
   # ============================================
-  # JOB 2: DEPLOY & DORA METRICS
+  # JOB 2: DEPLOY TO RAILWAY & TRACK DORA METRICS
   # ============================================
   deploy:
-    name: Deploy & Track DORA Metrics
+    name: Deploy to Railway & Track DORA Metrics
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
@@ -95,13 +95,74 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: 🚀 Deploy to Production
+      # ============================================
+      # CAPTURA DE TIMESTAMP INICIAL (para Lead Time real)
+      # ============================================
+      - name: 📊 Capture Deploy Start Time
+        id: deploy_start
         run: |
-          echo "🚀 Deploying to production..."
+          echo "DEPLOY_START_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+          echo "DEPLOY_START_EPOCH=$(date +%s)" >> $GITHUB_OUTPUT
+          echo "🕐 Deploy started at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      # ============================================
+      # DEPLOY A RAILWAY (sin sleeps artificiales)
+      # ============================================
+      - name: 🚀 Trigger Railway Deployment
+        id: railway_deploy
+        run: |
+          echo "🚀 Railway auto-deploys on push to master"
           echo "📦 Branch: ${{ github.ref_name }}"
           echo "📝 Commit: ${{ github.sha }}"
-          sleep 3
-          echo "✅ Deploy completed!"
+          echo "⏳ Railway will deploy automatically..."
+
+          # Railway ya está desplegando en paralelo gracias al webhook de GitHub
+          # No agregamos sleeps para no alterar las métricas
+
+      # ============================================
+      # VERIFICACIÓN DE DEPLOYMENT CON RETRY INTELIGENTE
+      # (sin alterar el tiempo de deploy, solo verifica disponibilidad)
+      # ============================================
+      - name: ✅ Wait for Railway Deployment
+        id: verify_deploy
+        run: |
+          echo "🔍 Waiting for Railway deployment to be ready..."
+
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          WAIT_SECONDS=5
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.APP_URL }}/api/ping || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Railway deployment is live! (HTTP 200)"
+              echo "DEPLOY_SUCCESS=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "⏳ Attempt $ATTEMPT/$MAX_ATTEMPTS - HTTP $HTTP_CODE - Retrying in ${WAIT_SECONDS}s..."
+
+            if [ $ATTEMPT -lt $MAX_ATTEMPTS ]; then
+              sleep $WAIT_SECONDS
+            fi
+          done
+
+          echo "❌ Deployment verification failed after $MAX_ATTEMPTS attempts"
+          echo "DEPLOY_SUCCESS=false" >> $GITHUB_OUTPUT
+          exit 1
+
+      # ============================================
+      # CAPTURA DE TIMESTAMP FINAL (Deploy completado)
+      # ============================================
+      - name: 📊 Capture Deploy End Time
+        id: deploy_end
+        if: success()
+        run: |
+          echo "DEPLOY_END_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_OUTPUT
+          echo "DEPLOY_END_EPOCH=$(date +%s)" >> $GITHUB_OUTPUT
+          echo "✅ Deploy completed at: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       # ============================================
       # MÉTRICA DORA 1: DEPLOYMENT FREQUENCY
@@ -109,44 +170,56 @@ jobs:
       - name: 📊 Record Deployment (Deployment Frequency)
         if: success()
         run: |
-          curl -i -X POST ${{ secrets.APP_URL }}/api/metrics/deployment \
+          curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
               "tool": "github-actions",
-              "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
-              "branch": "'"${{ github.ref_name }}"'",
-              "commit": "'"${{ github.sha }}"'",
+              "timestamp": "${{ steps.deploy_end.outputs.DEPLOY_END_TIME }}",
+              "branch": "${{ github.ref_name }}",
+              "commit": "${{ github.sha }}",
               "status": "success"
-            }'
+            }' && echo "✅ Deployment frequency recorded"
 
       # ============================================
-      # MÉTRICA DORA 2: LEAD TIME FOR CHANGES
+      # MÉTRICA DORA 2: LEAD TIME FOR CHANGES (REAL)
       # ============================================
-      - name: 📊 Calculate Lead Time
+      - name: 📊 Calculate & Record Real Lead Time
         if: success()
         run: |
+          # Obtener tiempo del commit (cuando se hizo el código)
           COMMIT_TIME=$(git show -s --format=%cI ${{ github.sha }})
-          DEPLOY_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
           COMMIT_EPOCH=$(date -d "$COMMIT_TIME" +%s)
-          DEPLOY_EPOCH=$(date -d "$DEPLOY_TIME" +%s)
-          LEAD_TIME=$((DEPLOY_EPOCH - COMMIT_EPOCH))
 
+          # Tiempo de deploy real (cuando Railway terminó de desplegar)
+          DEPLOY_TIME="${{ steps.deploy_end.outputs.DEPLOY_END_TIME }}"
+          DEPLOY_EPOCH=${{ steps.deploy_end.outputs.DEPLOY_END_EPOCH }}
+
+          # Calcular Lead Time REAL (desde commit hasta deploy completo)
+          LEAD_TIME=$((DEPLOY_EPOCH - COMMIT_EPOCH))
+          LEAD_TIME_MINUTES=$((LEAD_TIME / 60))
+          LEAD_TIME_HOURS=$(echo "scale=2; $LEAD_TIME / 3600" | bc)
+
+          echo "=================================="
+          echo "📊 REAL LEAD TIME CALCULATION"
+          echo "=================================="
           echo "⏱️  Commit Time: $COMMIT_TIME"
-          echo "⏱️  Deploy Time: $DEPLOY_TIME"
-          echo "⏱️  Lead Time: $LEAD_TIME seconds ($((LEAD_TIME / 60)) minutes)"
+          echo "⏱️  Deploy End Time: $DEPLOY_TIME"
+          echo "⏱️  Lead Time: $LEAD_TIME seconds"
+          echo "⏱️  Lead Time: $LEAD_TIME_MINUTES minutes"
+          echo "⏱️  Lead Time: $LEAD_TIME_HOURS hours"
+          echo "=================================="
 
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/leadtime \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
               "tool": "github-actions",
-              "commit": "'"${{ github.sha }}"'",
+              "commit": "${{ github.sha }}",
               "commit_time": "'"$COMMIT_TIME"'",
               "deploy_time": "'"$DEPLOY_TIME"'",
               "lead_time_seconds": '$LEAD_TIME'
-            }'
+            }' && echo "✅ Real lead time recorded: ${LEAD_TIME}s (${LEAD_TIME_MINUTES}m)"
 
       # ============================================
       # MÉTRICA DORA 3: CHANGE FAILURE RATE (Success)
@@ -159,58 +232,114 @@ jobs:
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
               "tool": "github-actions",
-              "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
-              "commit": "'"${{ github.sha }}"'",
+              "timestamp": "${{ steps.deploy_end.outputs.DEPLOY_END_TIME }}",
+              "commit": "${{ github.sha }}",
               "status": "success",
               "is_failure": false
-            }'
+            }' && echo "✅ Deployment success recorded"
 
       # ============================================
-      # MÉTRICA DORA 3: CHANGE FAILURE RATE (Failure)
+      # MÉTRICA DORA 4: MEAN TIME TO RECOVERY (Auto-resolve)
+      # ============================================
+      - name: 📊 Auto-resolve Previous Incidents (MTTR)
+        if: success()
+        run: |
+          RESPONSE=$(curl -s -X POST ${{ secrets.APP_URL }}/api/metrics/incident/resolve \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
+            -d '{
+              "tool": "github-actions",
+              "resolution_time": "${{ steps.deploy_end.outputs.DEPLOY_END_TIME }}"
+            }')
+
+          echo "$RESPONSE"
+
+          if echo "$RESPONSE" | grep -q "resolved"; then
+            echo "✅ Previous incident resolved"
+            echo "$RESPONSE" | grep -o '"mttr_minutes":[0-9.]*' || true
+          else
+            echo "ℹ️  No open incidents to resolve"
+          fi
+
+      # ============================================
+      # FAILURES: Record Failure & Create Incident
       # ============================================
       - name: 📊 Record Deployment Failure
         if: failure()
         run: |
+          FAILURE_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment-result \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
               "tool": "github-actions",
-              "timestamp": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
-              "commit": "'"${{ github.sha }}"'",
+              "timestamp": "'"$FAILURE_TIME"'",
+              "commit": "${{ github.sha }}",
               "status": "failure",
               "is_failure": true
-            }'
+            }' && echo "❌ Deployment failure recorded"
 
-      # ============================================
-      # MÉTRICA DORA 4: MEAN TIME TO RECOVERY (Create Incident)
-      # ============================================
       - name: 📊 Create Incident (MTTR)
         if: failure()
         run: |
+          INCIDENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
           curl -X POST ${{ secrets.APP_URL }}/api/metrics/incident \
             -H "Content-Type: application/json" \
             -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
             -d '{
               "tool": "github-actions",
-              "incident_id": "'"${{ github.run_id }}"'",
-              "start_time": "'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'",
-              "commit": "'"${{ github.sha }}"'",
-              "status": "open"
-            }
+              "incident_id": "${{ github.run_id }}",
+              "start_time": "'"$INCIDENT_TIME"'",
+              "commit": "${{ github.sha }}",
+              "status": "open",
+              "description": "Deployment failed in GitHub Actions - Run ID: ${{ github.run_id }}"
+            }' && echo "🚨 Incident created for failed deployment"
 
-        # ============================================
-        # RESUMEN
-        # ============================================
+      # ============================================
+      # RESUMEN FINAL CON MÉTRICAS REALES
+      # ============================================
       - name: 📊 DORA Metrics Summary
         if: always()
         run: |
-          echo "=================================="
-          echo "📊 DORA METRICS TRACKED"
-          echo "=================================="
-          echo "✅ Deployment Frequency: Recorded"
-          echo "✅ Lead Time: Calculated"
-          echo "✅ Change Failure Rate: Recorded"
-          echo "✅ MTTR: Tracked"
-          echo "=================================="
-          echo "View metrics at: ${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions"
+          echo "=========================================="
+          echo "📊 DORA METRICS - DEPLOYMENT SUMMARY"
+          echo "=========================================="
+          echo "🚀 Deployment Status: ${{ job.status }}"
+          echo "📝 Commit: ${{ github.sha }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+          echo ""
+          echo "✅ Metrics Recorded:"
+          echo "  • Deployment Frequency ✓"
+          echo "  • Lead Time for Changes ✓ (Real time from commit to deploy)"
+          echo "  • Change Failure Rate ✓"
+          echo "  • Mean Time to Recovery ✓"
+          echo "=========================================="
+          echo ""
+          echo "📈 View full DORA metrics:"
+          echo "${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions&period=30"
+          echo "=========================================="
+
+      # ============================================
+      # BONUS: Fetch and Display Current Metrics
+      # ============================================
+      - name: 📊 Display Current DORA Metrics
+        if: always()
+        continue-on-error: true
+        run: |
+          echo ""
+          echo "📊 Current DORA Performance (Last 30 days):"
+          echo "=========================================="
+
+          curl -s -X GET "${{ secrets.APP_URL }}/api/metrics/dora?tool=github-actions&period=30" \
+            -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" | jq -r '
+              "Deployment Frequency: \(.metrics.deployment_frequency.value) deploys/day [\(.metrics.deployment_frequency.rating)]",
+              "Lead Time: \(.metrics.lead_time_for_changes.value_hours) hours [\(.metrics.lead_time_for_changes.rating)]",
+              "Change Failure Rate: \(.metrics.change_failure_rate.value)% [\(.metrics.change_failure_rate.rating)]",
+              "MTTR: \(.metrics.mean_time_to_recovery.value_hours) hours [\(.metrics.mean_time_to_recovery.rating)]",
+              "",
+              "Overall Rating: \(.overall_rating)"
+            ' 2>/dev/null || echo "Could not fetch metrics (API might be unavailable)"
+
+          echo "=========================================="

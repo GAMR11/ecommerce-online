@@ -11,10 +11,17 @@ class ValidateMetricsApiKey
     public function handle(Request $request, Closure $next): Response
     {
         $apiKey = $request->header('X-API-Key');
-        $validKey = config('services.metrics.api_key');
+        $validKey = config('metrics.api_key'); // Cambio aquí
 
-        // Si no hay API key configurada, permitir (desarrollo)
+        // Si no hay API key configurada, denegar acceso en producción
         if (empty($validKey)) {
+            if (app()->environment('production')) {
+                return response()->json([
+                    'error' => 'Configuration error',
+                    'message' => 'API key not configured'
+                ], 500);
+            }
+            // En desarrollo, permitir
             return $next($request);
         }
 
