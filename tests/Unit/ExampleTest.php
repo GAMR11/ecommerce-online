@@ -11,6 +11,6 @@ class ExampleTest extends TestCase
      */
     public function test_that_true_is_true(): void
     {
-        $this->assertTrue(false);//modificamos el test a false para que falle de manera intencional y evaluar el tiempo de respuesta luego del ajuste.
+        $this->assertTrue(true);//modificamos el test a false para que falle de manera intencional y evaluar el tiempo de respuesta luego del ajuste.
     }
 }
