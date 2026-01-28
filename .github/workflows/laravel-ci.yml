@@ -80,6 +80,43 @@ jobs:
           DB_PASSWORD: password
         run: php artisan test
 
+      # ============================================
+      # NUEVO: Registrar fallo si los tests fallan
+      # ============================================
+      - name: 📊 Record Test Failure
+        if: failure() && github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          FAILURE_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          curl -X POST ${{ secrets.APP_URL }}/api/metrics/deployment-result \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
+            -d '{
+              "tool": "github-actions",
+              "timestamp": "'"$FAILURE_TIME"'",
+              "commit": "${{ github.sha }}",
+              "status": "failure",
+              "is_failure": true,
+              "failure_stage": "tests"
+            }' && echo "❌ Test failure recorded"
+
+      - name: 📊 Create Incident for Test Failure
+        if: failure() && github.ref == 'refs/heads/master' && github.event_name == 'push'
+        run: |
+          INCIDENT_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          curl -X POST ${{ secrets.APP_URL }}/api/metrics/incident \
+            -H "Content-Type: application/json" \
+            -H "X-API-Key: ${{ secrets.METRICS_API_KEY }}" \
+            -d '{
+              "tool": "github-actions",
+              "incident_id": "${{ github.run_id }}",
+              "start_time": "'"$INCIDENT_TIME"'",
+              "commit": "${{ github.sha }}",
+              "status": "open",
+              "description": "Tests failed in GitHub Actions - Run ID: ${{ github.run_id }}"
+            }' && echo "🚨 Incident created for test failure"
+
   # ============================================
   # JOB 2: DEPLOY TO RAILWAY & TRACK DORA METRICS
   # ============================================
@@ -262,7 +299,7 @@ jobs:
           fi
 
       # ============================================
-      # FAILURES: Record Failure & Create Incident
+      # FAILURES: Record Failure & Create Incident (Deploy failures)
       # ============================================
       - name: 📊 Record Deployment Failure
         if: failure()
@@ -277,7 +314,8 @@ jobs:
               "timestamp": "'"$FAILURE_TIME"'",
               "commit": "${{ github.sha }}",
               "status": "failure",
-              "is_failure": true
+              "is_failure": true,
+              "failure_stage": "deployment"
             }' && echo "❌ Deployment failure recorded"
 
       - name: 📊 Create Incident (MTTR)
