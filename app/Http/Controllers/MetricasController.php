@@ -10,6 +10,34 @@ use Carbon\Carbon;
 
 class MetricasController extends Controller
 {
+    public function prometheusMetrics()
+    {
+        $tools = ['github-actions', 'jenkins'];
+        $output = "";
+
+        foreach ($tools as $tool) {
+            $metrics = $this->calculateMetricsForTool($tool, 30); // Usamos tu lógica existente
+
+            // Formato Prometheus: nombre_metrica{etiquetas} valor
+            $output .= "# HELP dora_deployment_frequency Frecuencia de despliegue por dia\n";
+            $output .= "# TYPE dora_deployment_frequency gauge\n";
+            $output .= "dora_deployment_frequency{tool=\"$tool\"} " . $metrics['deployment_frequency']['value'] . "\n\n";
+
+            $output .= "# HELP dora_lead_time_hours Tiempo promedio de cambios en horas\n";
+            $output .= "# TYPE dora_lead_time_hours gauge\n";
+            $output .= "dora_lead_time_hours{tool=\"$tool\"} " . $metrics['lead_time']['hours'] . "\n\n";
+
+            $output .= "# HELP dora_change_failure_rate Porcentaje de fallos en cambios\n";
+            $output .= "# TYPE dora_change_failure_rate gauge\n";
+            $output .= "dora_change_failure_rate{tool=\"$tool\"} " . $metrics['change_failure_rate']['percentage'] . "\n\n";
+
+            $output .= "# HELP dora_mttr_hours Tiempo medio de recuperacion en horas\n";
+            $output .= "# TYPE dora_mttr_hours gauge\n";
+            $output .= "dora_mttr_hours{tool=\"$tool\"} " . $metrics['mttr']['hours'] . "\n";
+        }
+
+        return response($output)->header('Content-Type', 'text/plain; version=0.0.4');
+    }
     // ============================================
     // ALMACENAR MÉTRICAS
     // ============================================

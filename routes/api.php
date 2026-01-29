@@ -12,6 +12,8 @@ Route::prefix('metrics')
     ->middleware('metrics.api')
     ->group(function () {
 
+        Route::get('/metrics/prometheus', [MetricasController::class, 'prometheusMetrics']);
+
         // Almacenar métricas
         Route::post('/{type}', [MetricasController::class, 'store'])
             ->whereIn('type', ['deployment', 'leadtime', 'deployment-result', 'incident']);
