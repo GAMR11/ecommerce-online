@@ -17,16 +17,33 @@ pipeline {
             }
         }
 
+        stage('Clean Previous') {
+            steps {
+                script {
+                    echo "🧹 Limpiando ejecuciones previas..."
+                    bat '''
+                        cd %WORKSPACE%
+                        REM Detener y eliminar contenedores
+                        docker compose down -v 2>nul
+                        REM Eliminar contenedores huérfanos que puedan existir
+                        for /f "tokens=*" %%i in ('docker ps -aq -f "label=com.docker.compose.project=ecommerce-ci"') do docker rm -f %%i 2>nul
+                        for /f "tokens=*" %%i in ('docker ps -aq -f "label=com.docker.compose.project=ecommerce-ci2"') do docker rm -f %%i 2>nul
+                        REM Eliminar contenedores específicos por nombre
+                        docker rm -f ecommerce-app 2>nul
+                        docker rm -f ecommerce-nginx 2>nul
+                        docker rm -f ecommerce-mysql 2>nul
+                    '''
+                }
+            }
+        }
+
         stage('Build Containers') {
             steps {
                 script {
                     echo "🔨 Construyendo contenedores..."
                     bat '''
                         cd %WORKSPACE%
-                        docker compose down
-                        docker compose down -v
                         docker compose up -d --build
-                        timeout /t 20
                     '''
                 }
             }
@@ -52,12 +69,12 @@ pipeline {
                         
                         docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot > nul 2>&1
                         if errorlevel 1 (
-                            echo Intento !ATTEMPT!/!MAX_ATTEMPTS!...
-                            timeout /t 2 /nobreak
+                            echo Intento !ATTEMPT!/!MAX_ATTEMPTS! - Esperando MySQL...
+                            ping localhost -n 3 > nul
                             goto wait_loop
-                        ) else (
-                            echo ✅ MySQL está listo
                         )
+                        
+                        echo ✅ MySQL está listo
                     '''
                 }
             }
