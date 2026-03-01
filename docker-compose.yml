@@ -41,19 +41,12 @@ services:
       - laravel_network
 
   jenkins:
-    build:
-      context: .
-      dockerfile: docker/jenkins/Dockerfile
-    container_name: laravel_jenkins
-    restart: unless-stopped
+    build: ./docker/jenkins
     ports:
       - "8080:8080"
-      - "50000:50000"
     volumes:
       - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - laravel_network
 
 volumes:
   mysql_data:
