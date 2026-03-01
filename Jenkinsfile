@@ -8,6 +8,15 @@ pipeline {
     }
 
     stages {
+        stage('Checkout') {
+            steps {
+                script {
+                    echo "📁 Repositorio clonado"
+                    echo "Branch: ${GIT_BRANCH ?: 'N/A'}"
+                }
+            }
+        }
+
         stage('Build Containers') {
             steps {
                 script {
@@ -26,7 +35,7 @@ pipeline {
         stage('Wait for Services') {
             steps {
                 script {
-                    echo "⏳ Esperando que MySQL esté listo..."
+                    echo "⏳ Esperando MySQL..."
                     sh '''
                         cd ${WORKSPACE}
                         MAX_ATTEMPTS=30
@@ -34,13 +43,12 @@ pipeline {
                         
                         while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
                             if docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot > /dev/null 2>&1; then
-                                echo "✅ MySQL está listo"
+                                echo "✅ MySQL listo"
                                 break
                             fi
                             
                             if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
                                 echo "❌ MySQL no respondió"
-                                docker compose logs mysql
                                 exit 1
                             fi
                             
@@ -55,7 +63,7 @@ pipeline {
         stage('Run Migrations') {
             steps {
                 script {
-                    echo "🗄️  Ejecutando migraciones..."
+                    echo "🗄️  Migraciones..."
                     sh '''
                         cd ${WORKSPACE}
                         docker compose exec -T app php artisan migrate:fresh --force --seed || true
@@ -92,27 +100,17 @@ pipeline {
 
     post {
         always {
-            script {
-                sh '''
-                    cd ${WORKSPACE}
-                    docker compose logs --tail=30 || true
-                '''
-            }
+            sh 'cd ${WORKSPACE} && docker compose logs --tail=30 || true'
         }
 
         success {
             echo "✅ BUILD EXITOSO"
-            echo "App en: http://localhost:8000"
+            echo "App: http://localhost:8000"
         }
 
         failure {
             echo "❌ BUILD FALLÓ"
-            script {
-                sh '''
-                    cd ${WORKSPACE}
-                    docker compose logs || true
-                '''
-            }
+            sh 'cd ${WORKSPACE} && docker compose logs || true'
         }
     }
 }
