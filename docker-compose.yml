@@ -10,14 +10,19 @@ services:
       - "50000:50000"
     volumes:
       - jenkins_data:/var/jenkins_home
+      # ⭐ CRÍTICO: Acceso a Docker socket
       - /var/run/docker.sock:/var/run/docker.sock
-      # Agregamos docker CLI al contenedor
+      # Acceso a Docker CLI
       - /usr/bin/docker:/usr/bin/docker:ro
+      # Acceso a docker-compose (si lo tienes instalado localmente)
+      - /usr/local/bin/docker-compose:/usr/local/bin/docker-compose:ro
     environment:
       - JAVA_OPTS=-Xmx1024m -Xms512m
     networks:
       - laravel_network
-    user: root
+    user: root  # ⭐ IMPORTANTE: root para acceder a docker.sock
+    # Alternativa (si quieres usar usuario jenkins):
+    # user: "jenkins:docker"  # Requiere que exista el grupo docker
 
   app:
     build:
