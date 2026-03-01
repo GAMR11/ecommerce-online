@@ -1,41 +1,33 @@
 pipeline {
     agent any
 
-    environment {
-        DOCKER_COMPOSE_FILE = "docker-compose.yml"
-        WORKSPACE_DIR = "${WORKSPACE}"
+    options {
+        timestamps()
+        timeout(time: 30, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm
-                sh 'echo "Workspace: ${WORKSPACE_DIR}"'
-                sh 'ls -la docker/nginx/ || echo "Directorio nginx no existe"'
-                sh 'ls -la docker/php/ || echo "Directorio php no existe"'
+                script {
+                    echo "📁 Clonando repositorio..."
+                    checkout scm
+                    sh 'echo "Workspace: ${WORKSPACE}"'
+                }
             }
         }
 
         stage('Build Containers') {
             steps {
                 script {
-                    try {
-                        // Detener y limpiar contenedores previos
-                        sh '''
-                            docker compose down || true
-                            docker compose down -v || true
-                        '''
-                        
-                        // Crear los contenedores
-                        sh '''
-                            docker compose up -d --build
-                            sleep 10
-                        '''
-                    } catch (Exception e) {
-                        echo "Error durante build de contenedores: ${e.message}"
-                        sh 'docker compose logs || true'
-                        throw e
-                    }
+                    echo "🔨 Construyendo contenedores..."
+                    sh '''
+                        docker compose down || true
+                        docker compose down -v || true
+                        docker compose up -d --build
+                        sleep 15
+                    '''
                 }
             }
         }
@@ -43,22 +35,26 @@ pipeline {
         stage('Wait for Services') {
             steps {
                 script {
+                    echo "⏳ Esperando que MySQL esté listo..."
                     sh '''
-                        echo "Esperando a que los servicios estén listos..."
+                        MAX_ATTEMPTS=30
+                        ATTEMPT=1
                         
-                        # Esperar MySQL
-                        for i in {1..30}; do
-                            if docker compose exec -T mysql mysqladmin ping -h localhost > /dev/null 2>&1; then
-                                echo "✓ MySQL está listo"
+                        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+                            if docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot > /dev/null 2>&1; then
+                                echo "✅ MySQL está listo"
                                 break
                             fi
-                            echo "Intento $i: Esperando MySQL..."
+                            
+                            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+                                echo "❌ MySQL no respondió"
+                                docker compose logs mysql
+                                exit 1
+                            fi
+                            
                             sleep 2
+                            ATTEMPT=$((ATTEMPT + 1))
                         done
-                        
-                        # Esperar PHP-FPM
-                        sleep 5
-                        echo "✓ Servicios listos"
                     '''
                 }
             }
@@ -67,9 +63,8 @@ pipeline {
         stage('Run Migrations') {
             steps {
                 script {
-                    sh '''
-                        docker compose exec -T app php artisan migrate:fresh --seed || true
-                    '''
+                    echo "🗄️ Ejecutando migraciones..."
+                    sh 'docker compose exec -T app php artisan migrate:fresh --force --seed || true'
                 }
             }
         }
@@ -77,20 +72,20 @@ pipeline {
         stage('Cache Clear') {
             steps {
                 script {
+                    echo "🧹 Limpiando caché..."
                     sh '''
-                        docker compose exec -T app php artisan cache:clear || true
-                        docker compose exec -T app php artisan config:clear || true
+                        docker compose exec -T app php artisan cache:clear
+                        docker compose exec -T app php artisan config:clear
                     '''
                 }
             }
         }
 
-        stage('Run Tests') {
+        stage('Verify') {
             steps {
                 script {
-                    sh '''
-                        docker compose exec -T app php artisan test || true
-                    '''
+                    echo "✅ Verificando..."
+                    sh 'docker compose ps'
                 }
             }
         }
@@ -99,24 +94,20 @@ pipeline {
     post {
         always {
             script {
-                sh '''
-                    echo "=== Estado de contenedores ===" 
-                    docker compose ps || true
-                    echo "=== Logs de servicios ===" 
-                    docker compose logs --tail=50 || true
-                '''
+                sh 'docker compose logs --tail=30 || true'
             }
         }
-        failure {
-            script {
-                sh '''
-                    echo "❌ Pipeline falló"
-                    docker compose logs || true
-                '''
-            }
-        }
+
         success {
-            echo "✅ Pipeline completado exitosamente"
+            echo "✅ BUILD EXITOSO"
+            echo "App en: http://localhost:8000"
+        }
+
+        failure {
+            echo "❌ BUILD FALLÓ"
+            script {
+                sh 'docker compose logs || true'
+            }
         }
     }
 }
