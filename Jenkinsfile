@@ -21,12 +21,12 @@ pipeline {
             steps {
                 script {
                     echo "🔨 Construyendo contenedores..."
-                    sh '''
-                        cd ${WORKSPACE}
-                        docker compose down || true
-                        docker compose down -v || true
+                    bat '''
+                        cd %WORKSPACE%
+                        docker compose down
+                        docker compose down -v
                         docker compose up -d --build
-                        sleep 20
+                        timeout /t 20
                     '''
                 }
             }
@@ -36,25 +36,28 @@ pipeline {
             steps {
                 script {
                     echo "⏳ Esperando MySQL..."
-                    sh '''
-                        cd ${WORKSPACE}
-                        MAX_ATTEMPTS=30
-                        ATTEMPT=1
+                    bat '''
+                        cd %WORKSPACE%
+                        setlocal enabledelayedexpansion
+                        set MAX_ATTEMPTS=30
+                        set ATTEMPT=0
                         
-                        while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-                            if docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot > /dev/null 2>&1; then
-                                echo "✅ MySQL listo"
-                                break
-                            fi
-                            
-                            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
-                                echo "❌ MySQL no respondió"
-                                exit 1
-                            fi
-                            
-                            sleep 2
-                            ATTEMPT=$((ATTEMPT + 1))
-                        done
+                        :wait_loop
+                        set /a ATTEMPT+=1
+                        if !ATTEMPT! gtr !MAX_ATTEMPTS! (
+                            echo ❌ MySQL no respondió
+                            docker compose logs mysql
+                            exit /b 1
+                        )
+                        
+                        docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot > nul 2>&1
+                        if errorlevel 1 (
+                            echo Intento !ATTEMPT!/!MAX_ATTEMPTS!...
+                            timeout /t 2 /nobreak
+                            goto wait_loop
+                        ) else (
+                            echo ✅ MySQL está listo
+                        )
                     '''
                 }
             }
@@ -63,10 +66,10 @@ pipeline {
         stage('Run Migrations') {
             steps {
                 script {
-                    echo "🗄️  Migraciones..."
-                    sh '''
-                        cd ${WORKSPACE}
-                        docker compose exec -T app php artisan migrate:fresh --force --seed || true
+                    echo "🗄️  Ejecutando migraciones..."
+                    bat '''
+                        cd %WORKSPACE%
+                        docker compose exec -T app php artisan migrate:fresh --force --seed
                     '''
                 }
             }
@@ -76,8 +79,8 @@ pipeline {
             steps {
                 script {
                     echo "🧹 Limpiando caché..."
-                    sh '''
-                        cd ${WORKSPACE}
+                    bat '''
+                        cd %WORKSPACE%
                         docker compose exec -T app php artisan cache:clear
                         docker compose exec -T app php artisan config:clear
                     '''
@@ -89,8 +92,8 @@ pipeline {
             steps {
                 script {
                     echo "✅ Verificando..."
-                    sh '''
-                        cd ${WORKSPACE}
+                    bat '''
+                        cd %WORKSPACE%
                         docker compose ps
                     '''
                 }
@@ -100,7 +103,10 @@ pipeline {
 
     post {
         always {
-            sh 'cd ${WORKSPACE} && docker compose logs --tail=30 || true'
+            bat '''
+                cd %WORKSPACE%
+                docker compose logs --tail=30
+            '''
         }
 
         success {
@@ -110,7 +116,10 @@ pipeline {
 
         failure {
             echo "❌ BUILD FALLÓ"
-            sh 'cd ${WORKSPACE} && docker compose logs || true'
+            bat '''
+                cd %WORKSPACE%
+                docker compose logs
+            '''
         }
     }
 }
