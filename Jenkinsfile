@@ -8,25 +8,16 @@ pipeline {
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                script {
-                    echo "📁 Clonando repositorio..."
-                    checkout scm
-                    sh 'echo "Workspace: ${WORKSPACE}"'
-                }
-            }
-        }
-
         stage('Build Containers') {
             steps {
                 script {
                     echo "🔨 Construyendo contenedores..."
                     sh '''
+                        cd ${WORKSPACE}
                         docker compose down || true
                         docker compose down -v || true
                         docker compose up -d --build
-                        sleep 15
+                        sleep 20
                     '''
                 }
             }
@@ -37,6 +28,7 @@ pipeline {
                 script {
                     echo "⏳ Esperando que MySQL esté listo..."
                     sh '''
+                        cd ${WORKSPACE}
                         MAX_ATTEMPTS=30
                         ATTEMPT=1
                         
@@ -63,8 +55,11 @@ pipeline {
         stage('Run Migrations') {
             steps {
                 script {
-                    echo "🗄️ Ejecutando migraciones..."
-                    sh 'docker compose exec -T app php artisan migrate:fresh --force --seed || true'
+                    echo "🗄️  Ejecutando migraciones..."
+                    sh '''
+                        cd ${WORKSPACE}
+                        docker compose exec -T app php artisan migrate:fresh --force --seed || true
+                    '''
                 }
             }
         }
@@ -74,6 +69,7 @@ pipeline {
                 script {
                     echo "🧹 Limpiando caché..."
                     sh '''
+                        cd ${WORKSPACE}
                         docker compose exec -T app php artisan cache:clear
                         docker compose exec -T app php artisan config:clear
                     '''
@@ -85,7 +81,10 @@ pipeline {
             steps {
                 script {
                     echo "✅ Verificando..."
-                    sh 'docker compose ps'
+                    sh '''
+                        cd ${WORKSPACE}
+                        docker compose ps
+                    '''
                 }
             }
         }
@@ -94,7 +93,10 @@ pipeline {
     post {
         always {
             script {
-                sh 'docker compose logs --tail=30 || true'
+                sh '''
+                    cd ${WORKSPACE}
+                    docker compose logs --tail=30 || true
+                '''
             }
         }
 
@@ -106,7 +108,10 @@ pipeline {
         failure {
             echo "❌ BUILD FALLÓ"
             script {
-                sh 'docker compose logs || true'
+                sh '''
+                    cd ${WORKSPACE}
+                    docker compose logs || true
+                '''
             }
         }
     }
