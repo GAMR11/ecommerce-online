@@ -61,12 +61,29 @@ class MetricasController extends Controller
         }
 
         try {
+
+            $data = $request->all();
+
+            if ($type === 'leadtime') {
+                $now = Carbon::now();
+                
+                // Lead Time Técnico: Desde el commit (eficiencia del dev)
+                if ($request->filled('commit_at')) {
+                    $data['lead_time_seconds'] = $now->diffInSeconds(Carbon::parse($request->commit_at));
+                }
+
+                // Lead Time de Negocio: Desde Jira (agilidad organizacional)
+                if ($request->filled('jira_created_at')) {
+                    $data['business_lead_time_seconds'] = $now->diffInSeconds(Carbon::parse($request->jira_created_at));
+                }
+            }
+
             $metric = Metric::create([
-                'type' => $type,
-                'tool' => $request->tool,
-                'data' => $request->all(),
-                'timestamp' => $request->timestamp ?? now(),
-            ]);
+            'type' => $type,
+            'tool' => $request->tool,
+            'data' => $data,
+            'timestamp' => $request->timestamp ?? now(),
+        ]);
 
             return response()->json([
                 'status' => 'recorded',
