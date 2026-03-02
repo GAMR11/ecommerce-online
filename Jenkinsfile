@@ -15,11 +15,11 @@ pipeline {
         stage('Checkout & Info') {
             steps {
                 script {
-                    echo "🔍 Obteniendo información del Git..."
+                    echo '🔍 Obteniendo información del Git...'
                     checkout scm
 
                     // Capturar SHA del commit y timestamp del commit (epoch)
-                    env.GIT_COMMIT_SHA = bat(script: "@echo off & git rev-parse HEAD", returnStdout: true).trim()
+                    env.GIT_COMMIT_SHA = bat(script: '@echo off & git rev-parse HEAD', returnStdout: true).trim()
                     def commitTimestamp = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
 
                     // Guardar tiempos para cálculos posteriores
@@ -27,7 +27,7 @@ pipeline {
                     env.PIPELINE_START_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
 
                     // Formato legible para la DB
-                    env.COMMIT_TIME_ISO = new Date(commitTimestamp.toLong() * 1000).format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
+                    env.COMMIT_TIME_ISO = new Date(commitTimestamp.toLong() * 1000).format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
 
                     echo "📝 Commit: ${env.GIT_COMMIT_SHA}"
                     echo "⏱️ Commit Time: ${env.COMMIT_TIME_ISO}"
@@ -58,10 +58,10 @@ pipeline {
         stage('Build & Deploy (Docker)') {
             steps {
                 script {
-                    echo "🏗️ Levantando entorno Docker..."
+                    echo '🏗️ Levantando entorno Docker...'
                     bat 'docker compose up -d --build'
 
-                    echo "📊 Migraciones y Limpieza..."
+                    echo '📊 Migraciones y Limpieza...'
                     bat 'docker compose exec -T app php artisan migrate --force --seed'
                     bat 'docker compose exec -T app php artisan cache:clear'
                 }
@@ -71,24 +71,23 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    echo "🧪 Ejecutando tests unitarios..."
+                    echo '🧪 Ejecutando tests unitarios...'
                     // Si falla aquí, irá al bloque post { failure }
                     bat 'docker compose exec -T app php artisan test'
                 }
             }
         }
-
     }
 
         stage('Track DORA Metrics') {
-    steps {
-        script {
-            echo "📊 Procesando métricas integrales..."
-            def nowIso = new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
-            def currentStatus = currentBuild.result ?: 'SUCCESS'
+        steps {
+            script {
+                echo '📊 Procesando métricas integrales...'
+                def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
+                def currentStatus = currentBuild.result ?: 'SUCCESS'
 
-            // Payload base con la trazabilidad completa
-            def baseData = [
+                // Payload base con la trazabilidad completa
+                def baseData = [
                 tool: env.TOOL_NAME,
                 timestamp: nowIso,
                 commit: env.GIT_COMMIT_SHA,
@@ -99,43 +98,42 @@ pipeline {
                 status: currentStatus
             ]
 
-            // CASO 1: Éxito (Deployment Frequency & Lead Time)
-            if (currentStatus == 'SUCCESS') {
-                baseData.is_failure = false
+                // CASO 1: Éxito (Deployment Frequency & Lead Time)
+                if (currentStatus == 'SUCCESS') {
+                    baseData.is_failure = false
 
-                // Registro de Despliegue Exitoso
-                bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
+                    // Registro de Despliegue Exitoso
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
 
-                // Registro de Lead Time (El controlador calculará técnico vs negocio)
-                bat "curl -X POST ${env.APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
+                    // Registro de Lead Time (El controlador calculará técnico vs negocio)
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
 
-                // CASO 2: Recuperación (MTTR)
-                // Si veníamos de un fallo, este éxito cierra el incidente
-                def resolveData = [tool: env.TOOL_NAME, resolution_time: nowIso]
-                bat "curl -X POST ${env.APP_URL}/api/metrics/incident/resolve -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(resolveData).replace('"', '\\"')}\""
-            }
+                    // CASO 2: Recuperación (MTTR)
+                    // Si veníamos de un fallo, este éxito cierra el incidente
+                    def resolveData = [tool: env.TOOL_NAME, resolution_time: nowIso]
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/incident/resolve -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(resolveData).replace('"', '\\"')}\""
+                }
 
             // CASO 3: Fallo (Change Failure Rate)
             else {
-                baseData.is_failure = true
+                    baseData.is_failure = true
 
-                // Registro de Despliegue Fallido
-                bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
+                    // Registro de Despliegue Fallido
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
 
-                // Apertura de Incidente para MTTR
-                def incidentData = baseData + [status: "open", start_time: nowIso, description: "Pipeline failed in ${env.STAGE_NAME}"]
-                bat "curl -X POST ${env.APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(incidentData).replace('"', '\\"')}\""
+                    // Apertura de Incidente para MTTR
+                    def incidentData = baseData + [status: 'open', start_time: nowIso, description: "Pipeline failed in ${env.STAGE_NAME}"]
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(incidentData).replace('"', '\\"')}\""
+            }
             }
         }
-    }
         }
-}
 
     post {
         failure {
             script {
-                echo "❌ Pipeline fallido - Registrando Incidente..."
-                def nowIso = new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
+                echo '❌ Pipeline fallido - Registrando Incidente...'
+                def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
 
                 // Registrar el fallo para Change Failure Rate
                 def failData = JsonOutput.toJson([
@@ -151,7 +149,7 @@ pipeline {
                     tool: env.TOOL_NAME,
                     start_time: nowIso,
                     timestamp: nowIso,
-                    status: "open",
+                    status: 'open',
                     description: "Build #${env.BUILD_NUMBER} failed"
                 ])
                 bat "curl -X POST ${env.APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -d \"${incidentData.replace('"', '\\"')}\""
@@ -159,3 +157,4 @@ pipeline {
         }
     }
 }
+
