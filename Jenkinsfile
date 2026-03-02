@@ -132,7 +132,7 @@ pipeline {
                 script {
                     echo "🧪 Ejecutando tests..."
                     bat '''
-                        docker compose exec -T app php artisan test --parallel 2>&1 || (
+                        docker compose exec -T app php artisan test 2>&1 || (
                             echo ❌ Tests fallaron
                             exit /b 1
                         )
