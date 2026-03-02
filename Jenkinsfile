@@ -41,7 +41,7 @@ pipeline {
                     bat 'docker compose up -d --build'
                     
                     echo "📊 Migraciones y Limpieza..."
-                    bat 'docker compose exec -T app php artisan migrate:fresh --force --seed'
+                    bat 'docker compose exec -T app php artisan migrate --force --seed'
                     bat 'docker compose exec -T app php artisan cache:clear'
                 }
             }
