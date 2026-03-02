@@ -5,7 +5,7 @@ pipeline {
 
     environment {
         APP_URL         = 'http://localhost:8000'
-        METRICS_API_KEY = 'tu_clave_aqui' 
+        METRICS_API_KEY = 'tu_clave_aqui'
         TOOL_NAME       = 'jenkins'
         JIRA_SITE       = 'API TOKEN JIRA' // Asegúrate de que este nombre coincida con el de la config global de Jenkins
     }
@@ -33,18 +33,21 @@ pipeline {
         stage('Fetch Jira Info') {
             steps {
                 script {
-                    def jiraTicket = env.BRANCH_NAME.find(/KAN-\d+/)
+                    // Corrección del NullPointerException:
+                    def branchName = env.BRANCH_NAME ?: ''
+                    def jiraTicket = branchName.find(/KAN-\d+/)
+
                     if (jiraTicket) {
                         try {
                             def issue = jiraGetIssue(idOrKey: jiraTicket, site: env.JIRA_SITE)
                             env.JIRA_CREATED_AT = issue.data.fields.created.replace('T', ' ').substring(0, 19)
                             env.JIRA_ISSUE_KEY = jiraTicket
-                            echo "✅ Jira Ticket: ${env.JIRA_ISSUE_KEY} creado el ${env.JIRA_CREATED_AT}"
+                            echo "✅ Jira Ticket: ${env.JIRA_ISSUE_KEY}"
                         } catch (e) {
-                            echo "⚠️ No se pudo obtener info de Jira: ${e.message}"
+                            echo "⚠️ Error Jira: ${e.message}"
                         }
                     } else {
-                        echo "ℹ️ No se detectó ticket de Jira en el nombre de la rama."
+                        echo 'ℹ️ No se detectó ticket en la rama actual.'
                     }
                 }
             }
@@ -77,7 +80,7 @@ pipeline {
                 script {
                     echo '📊 Procesando métricas integrales...'
                     def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
-                    
+
                     // En Jenkins Declarative, si llegamos aquí es que los stages previos fueron SUCCESS
                     def currentStatus = 'SUCCESS'
 
@@ -93,13 +96,13 @@ pipeline {
                         is_failure: false
                     ]
 
-                    echo "📤 Enviando Deployment Result..."
+                    echo '📤 Enviando Deployment Result...'
                     bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
 
-                    echo "📤 Enviando Lead Time..."
+                    echo '📤 Enviando Lead Time...'
                     bat "curl -X POST ${env.APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(baseData).replace('"', '\\"')}\""
 
-                    echo "📤 Resolviendo incidentes previos (MTTR)..."
+                    echo '📤 Resolviendo incidentes previos (MTTR)...'
                     def resolveData = [tool: env.TOOL_NAME, resolution_time: nowIso]
                     bat "curl -X POST ${env.APP_URL}/api/metrics/incident/resolve -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(resolveData).replace('"', '\\"')}\""
                 }
@@ -120,7 +123,7 @@ pipeline {
                     is_failure: true,
                     status: 'FAILURE'
                 ]
-                
+
                 // Registrar fallo para Change Failure Rate
                 bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${JsonOutput.toJson(failData).replace('"', '\\"')}\""
 
