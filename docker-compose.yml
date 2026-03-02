@@ -40,6 +40,8 @@ services:
       - "3000:3000"
     volumes:
       - grafana_data:/var/lib/grafana
+    networks:          # <--- AÑADE ESTO
+      - laravel_network # <--- AÑADE ESTO
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin # Cambia esto luego
 
