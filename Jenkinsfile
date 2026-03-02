@@ -99,10 +99,10 @@ pipeline {
                             exit /b 1
                         )
                         
-                        docker compose exec -T mysql mysqladmin ping -h localhost -u root -proot >nul 2>&1
+                        docker compose exec -T mysql mysqladmin ping -h mysql -u root -proot >nul 2>&1
                         if errorlevel 1 (
                             echo Intento !ATTEMPT!/!MAX_ATTEMPTS!...
-                            ping localhost -n 2 >nul
+                            ping mysql -n 2 >nul
                             goto wait_loop
                         )
                         
