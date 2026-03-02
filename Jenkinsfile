@@ -1,254 +1,131 @@
-// ============================================
-// JENKINSFILE PARA WINDOWS - VERSIÓN SIMPLIFICADA
-// ============================================
-// ⚠️ IMPORTANTE:
-// - Usa 'bat' en lugar de 'sh'
-// - Sin rutas complejas con backslashes
-// - Enfocado en capturar métricas DORA
+import groovy.json.JsonOutput
 
 pipeline {
     agent any
 
     environment {
-        // Configuración de API
-        METRICS_API_URL = 'http://localhost:8000/api/metrics'
-        METRICS_TOOL = 'jenkins'
-    }
-
-    triggers {
-        githubPush()
-        pollSCM('H/5 * * * *')
-    }
-
-    options {
-        timestamps()
-        timeout(time: 30, unit: 'MINUTES')
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // Usamos localhost:8000 para llegar a la API de Laravel desde el host de Jenkins
+        APP_URL         = 'http://localhost:8000'
+        METRICS_API_KEY = 'tu_clave_aqui' // Configúrala en el middleware si la activas
+        TOOL_NAME       = 'jenkins'
     }
 
     stages {
-        // ============================================
-        // STAGE 1: CHECKOUT
-        // ============================================
-        stage('Checkout') {
+        stage('Checkout & Info') {
             steps {
                 script {
-                    echo '🔍 Checkout: Descargando código...'
+                    echo "🔍 Obteniendo información del Git..."
                     checkout scm
-                    echo "📌 Commit: ${GIT_COMMIT}"
-                    echo "📌 Branch: ${GIT_BRANCH}"
+                    
+                    // Capturar SHA del commit y timestamp del commit (epoch)
+                    env.GIT_COMMIT_SHA = bat(script: "@echo off & git rev-parse HEAD", returnStdout: true).trim()
+                    def commitTimestamp = bat(script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}", returnStdout: true).trim()
+                    
+                    // Guardar tiempos para cálculos posteriores
+                    env.COMMIT_TIME_EPOCH = commitTimestamp
+                    env.PIPELINE_START_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
+                    
+                    // Formato legible para la DB
+                    env.COMMIT_TIME_ISO = new Date(commitTimestamp.toLong() * 1000).format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
+                    
+                    echo "📝 Commit: ${env.GIT_COMMIT_SHA}"
+                    echo "⏱️ Commit Time: ${env.COMMIT_TIME_ISO}"
                 }
             }
         }
 
-        // ============================================
-        // STAGE 2: VERIFICAR ENTORNO
-        // ============================================
-        stage('Environment Check') {
+        stage('Build & Deploy (Docker)') {
             steps {
                 script {
-                    echo '🐳 Verificando Docker...'
-                    bat 'docker compose --version'
-                    bat 'docker --version'
-                }
-            }
-        }
-
-        // ============================================
-        // STAGE 3: LIMPIAR Y PREPARAR
-        // ============================================
-        stage('Clean Previous') {
-            steps {
-                script {
-                    echo '🧹 Limpiando contenedores previos...'
-                    bat '''
-                        docker compose down -v 2>nul || echo Nada que limpiar
-                    '''
-                }
-            }
-        }
-
-        // ============================================
-        // STAGE 4: BUILD Y START CONTAINERS
-        // ============================================
-        stage('Build Containers') {
-            steps {
-                script {
-                    echo '🏗️ Construyendo contenedores...'
+                    echo "🏗️ Levantando entorno Docker..."
                     bat 'docker compose up -d --build'
-                }
-            }
-        }
-
-        // ============================================
-        // STAGE 5: ESPERAR A SERVICIOS
-        // ============================================
-        stage('Wait for Services') {
-            steps {
-                script {
-                    echo '⏳ Esperando a que servicios estén listos...'
-                    bat '''
-                        setlocal enabledelayedexpansion
-                        set MAX_ATTEMPTS=30
-                        set ATTEMPT=0
-
-                        :wait_loop
-                        set /a ATTEMPT+=1
-                        if !ATTEMPT! GTR !MAX_ATTEMPTS! (
-                            echo ❌ MySQL no respondio
-                            exit /b 1
-                        )
-
-                        docker compose exec -T mysql mysqladmin ping -h mysql -u root -proot >nul 2>&1
-                        if errorlevel 1 (
-                            echo Intento !ATTEMPT!/!MAX_ATTEMPTS!...
-                            ping mysql -n 2 >nul
-                            goto wait_loop
-                        )
-
-                        echo ✅ MySQL listo
-                    '''
-                }
-            }
-        }
-
-        // ============================================
-        // STAGE 6: MIGRATIONS
-        // ============================================
-        stage('Run Migrations') {
-            steps {
-                script {
-                    echo '📊 Ejecutando migraciones...'
+                    
+                    echo "📊 Migraciones y Limpieza..."
                     bat 'docker compose exec -T app php artisan migrate:fresh --force --seed'
+                    bat 'docker compose exec -T app php artisan cache:clear'
                 }
             }
         }
 
-        // ============================================
-        // STAGE 7: TESTS
-        // ============================================
         stage('Run Tests') {
             steps {
                 script {
-                    echo '🧪 Ejecutando tests...'
-                    bat '''
-                        docker compose exec -T app php artisan test 2>&1 || (
-                            echo ❌ Tests fallaron
-                            exit /b 1
-                        )
-                        echo ✅ Tests exitosos
-                    '''
+                    echo "🧪 Ejecutando tests unitarios..."
+                    // Si falla aquí, irá al bloque post { failure }
+                    bat 'docker compose exec -T app php artisan test'
                 }
             }
         }
 
-        // ============================================
-        // STAGE 8: CACHE CLEAR
-        // ============================================
-        stage('Cache Clear') {
+        stage('Track DORA Metrics') {
             steps {
                 script {
-                    echo '🧹 Limpiando cache...'
-                    bat '''
-                        docker compose exec -T app php artisan cache:clear
-                        docker compose exec -T app php artisan config:clear
-                    '''
-                }
-            }
-        }
+                    echo "📊 Registrando Métricas DORA..."
+                    def nowIso = new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
+                    def nowEpoch = (System.currentTimeMillis() / 1000).toLong()
 
-        // ============================================
-        // STAGE 9: VERIFICACIÓN FINAL
-        // ============================================
-        stage('Verify Deployment') {
-            steps {
-                script {
-                    echo '✅ Verificando deployment...'
-                    bat '''
-                        echo Estado de contenedores:
-                        docker compose ps
+                    // --- MÉTRICA 1 & 3: Deployment Frequency & Success ---
+                    def deploymentData = JsonOutput.toJson([
+                        tool: env.TOOL_NAME,
+                        timestamp: nowIso,
+                        commit: env.GIT_COMMIT_SHA,
+                        status: "success",
+                        is_failure: false
+                    ])
+                    
+                    // Guardar en endpoint deployment
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment -H \"Content-Type: application/json\" -d \"${deploymentData.replace('"', '\\"')}\""
+                    // Guardar en endpoint result para Change Failure Rate
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${deploymentData.replace('"', '\\"')}\""
 
-                        echo.
-                        echo Health check:
-                        docker compose exec -T app php artisan tinker --execute="echo 'Laravel OK'"
-                    '''
-                }
-            }
-        }
+                    // --- MÉTRICA 2: Lead Time for Changes ---
+                    // Diferencia entre: Cuando se hizo el commit y cuando se desplegó
+                    long leadTimeSeconds = nowEpoch - env.COMMIT_TIME_EPOCH.toLong()
+                    
+                    def leadTimeData = JsonOutput.toJson([
+                        tool: env.TOOL_NAME,
+                        commit: env.GIT_COMMIT_SHA,
+                        lead_time_seconds: leadTimeSeconds,
+                        timestamp: nowIso
+                    ])
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/leadtime -H \"Content-Type: application/json\" -d \"${leadTimeData.replace('"', '\\"')}\""
 
-        // ============================================
-        // STAGE 10: GUARDAR MÉTRICAS
-        // ============================================
-        // ============================================
-        // STAGE 10: GUARDAR MÉTRICAS EN DB
-        // ============================================
-        stage('Save Build Metrics') {
-            steps {
-                script {
-                    echo '📊 Registrando métrica en la base de datos...'
-
-                    bat '''
-                        @echo off
-                        setlocal enabledelayedexpansion
-
-                        REM 1. Obtener Timestamp
-                        for /f "tokens=*" %%A in ('powershell -Command "[datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')"') do set BUILD_TIMESTAMP=%%A
-
-                        REM 2. Enviar a la Base de Datos vía API interna de Docker
-                        REM Usamos el nombre del servicio 'app' o 'localhost' si Jenkins está fuera
-                        echo Enviando POST a la tabla metrics...
-
-                        curl -X POST "http://localhost:8000/api/metrics/deployment" ^
-                             -H "Content-Type: application/json" ^
-                             -H "Accept: application/json" ^
-                             -d "{\\"tool\\":\\"jenkins\\", \\"build_number\\":\\"%BUILD_NUMBER%\\", \\"commit\\":\\"%GIT_COMMIT%\\", \\"status\\":\\"SUCCESS\\", \\"timestamp\\":\\"!BUILD_TIMESTAMP!\\"}"
-
-                        REM 3. Crear el archivo local por si acaso
-                        (
-                            echo Build Number: %BUILD_NUMBER%
-                            echo Commit: %GIT_COMMIT%
-                            echo Branch: %GIT_BRANCH%
-                            echo Timestamp: !BUILD_TIMESTAMP!
-                            echo Status: SUCCESS
-                        ) > build_summary.txt
-
-                        echo.
-                        echo ✅ Registro completado en DB y archivo.
-                    '''
+                    // --- MÉTRICA 4: MTTR (Auto-Resolve) ---
+                    // Si este build tuvo éxito, intentamos cerrar incidentes previos
+                    def resolveData = JsonOutput.toJson([
+                        tool: env.TOOL_NAME,
+                        resolution_time: nowIso
+                    ])
+                    bat "curl -X POST ${env.APP_URL}/api/metrics/incident/resolve -H \"Content-Type: application/json\" -d \"${resolveData.replace('"', '\\"')}\""
                 }
             }
         }
     }
 
     post {
-        always {
-            script {
-                echo '🧹 Limpieza post-build...'
-                bat '''
-                    echo Build completado
-                    echo Timestamp: %date% %time%
-                '''
-            }
-        }
-
-        success {
-            script {
-                echo '✅ BUILD EXITOSO'
-                bat 'echo ✅ Pipeline completado exitosamente'
-            }
-        }
-
         failure {
             script {
-                echo '❌ BUILD FALLÓ'
-                bat 'echo ❌ Pipeline finalizo con error'
-            }
-        }
+                echo "❌ Pipeline fallido - Registrando Incidente..."
+                def nowIso = new Date().format("yyyy-MM-dd HH:mm:ss", TimeZone.getTimeZone('UTC'))
+                
+                // Registrar el fallo para Change Failure Rate
+                def failData = JsonOutput.toJson([
+                    tool: env.TOOL_NAME,
+                    timestamp: nowIso,
+                    commit: env.GIT_COMMIT_SHA ?: 'unknown',
+                    is_failure: true
+                ])
+                bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result -H \"Content-Type: application/json\" -d \"${failData.replace('"', '\\"')}\""
 
-        cleanup {
-            script {
-                echo '🧹 Limpieza final...'
-                deleteDir()
+                // Crear un incidente abierto para MTTR
+                def incidentData = JsonOutput.toJson([
+                    tool: env.TOOL_NAME,
+                    start_time: nowIso,
+                    timestamp: nowIso,
+                    status: "open",
+                    description: "Build #${env.BUILD_NUMBER} failed"
+                ])
+                bat "curl -X POST ${env.APP_URL}/api/metrics/incident -H \"Content-Type: application/json\" -d \"${incidentData.replace('"', '\\"')}\""
             }
         }
     }
