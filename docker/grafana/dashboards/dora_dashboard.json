@@ -1,0 +1,48 @@
+{
+  "title": "DORA Metrics - MySQL Ecommerce",
+  "panels": [
+    {
+      "title": "Deployment Frequency",
+      "type": "graph",
+      "targets": [
+        {
+          "rawSql": "SELECT timestamp AS time, count(*) as value FROM metrics WHERE type = 'deployment-result' AND JSON_EXTRACT(data, '$.is_failure') = false GROUP BY 1 ORDER BY 1",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "title": "Lead Time for Changes (Minutes)",
+      "type": "stat",
+      "targets": [
+        {
+          "rawSql": "SELECT avg(CAST(JSON_EXTRACT(data, '$.lead_time_seconds') AS UNSIGNED) / 60) FROM metrics WHERE type = 'leadtime'",
+          "format": "table"
+        }
+      ]
+    },
+    {
+      "title": "Change Failure Rate (%)",
+      "type": "gauge",
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {"color": "green", "value": null},
+              {"color": "yellow", "value": 15},
+              {"color": "red", "value": 30}
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "rawSql": "SELECT (SUM(CASE WHEN JSON_EXTRACT(data, '$.is_failure') = true THEN 1 ELSE 0 END) / COUNT(*)) * 100 FROM metrics WHERE type = 'deployment-result'",
+          "format": "table"
+        }
+      ]
+    }
+  ]
+}
