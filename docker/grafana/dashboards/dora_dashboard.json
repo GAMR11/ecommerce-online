@@ -1,9 +1,10 @@
 {
-  "title": "DORA Metrics - MySQL Ecommerce",
+  "title": "DASHBOARD DE METRICAS DORA",
   "panels": [
     {
       "title": "Deployment Frequency",
-      "type": "graph",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "type": "timeseries",
       "targets": [
         {
           "rawSql": "SELECT timestamp AS time, count(*) as value FROM metrics WHERE type = 'deployment-result' AND JSON_EXTRACT(data, '$.is_failure') = false GROUP BY 1 ORDER BY 1",
@@ -12,7 +13,8 @@
       ]
     },
     {
-      "title": "Lead Time for Changes (Minutes)",
+      "title": "Lead Time for Changes (Minutos)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "type": "stat",
       "targets": [
         {
@@ -23,6 +25,7 @@
     },
     {
       "title": "Change Failure Rate (%)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "type": "gauge",
       "fieldConfig": {
         "defaults": {
@@ -43,6 +46,25 @@
           "format": "table"
         }
       ]
+    },
+    {
+      "title": "Mean Time to Recovery (MTTR - Minutos)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "type": "stat",
+      "description": "Tiempo promedio para resolver incidentes",
+      "targets": [
+        {
+          "rawSql": "SELECT AVG(CAST(JSON_EXTRACT(data, '$.duration_minutes') AS UNSIGNED)) FROM metrics WHERE type = 'incident' AND JSON_EXTRACT(data, '$.status') = 'resolved'",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "special", "options": { "match": "null", "result": { "text": "0" } } }
+          ]
+        }
+      }
     }
   ]
 }
