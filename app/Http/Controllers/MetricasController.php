@@ -11,6 +11,326 @@ use Carbon\Carbon;
 class MetricasController extends Controller
 {
 
+    /**
+     * CAPTURAR ISSUE DE JIRA
+     * Registra información del issue/ticket de Jira
+     */
+    public function recordJiraIssue(Request $request)
+    {
+        $validated = $request->validate([
+            'tool' => 'required|string|in:jira,jenkins',
+            'issue_key' => 'required|string', // KAN-1, KAN-2, etc
+            'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
+            'summary' => 'required|string',
+            'description' => 'nullable|string',
+            'status' => 'required|string|in:To Do,In Progress,In Review,Done',
+            'assignee' => 'required|string',
+            'reporter' => 'required|string',
+            'created_at' => 'required|date_format:Y-m-d H:i:s',
+            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
+            'sprint_id' => 'nullable|integer',
+            'story_points' => 'nullable|integer',
+        ]);
+
+        try {
+            // Guardar en tabla metrics (general)
+            Metric::create([
+                'type' => 'jira-issue',
+                'tool' => $validated['tool'],
+                'data' => json_encode($validated),
+                'timestamp' => now(),
+            ]);
+
+            // Opcional: Guardar en tabla jira_issues (si existe)
+            if (DB::table('jira_issues')->exists()) {
+                DB::table('jira_issues')->updateOrInsert(
+                    ['jira_key' => $validated['issue_key']],
+                    [
+                        'issue_type' => $validated['issue_type'],
+                        'summary' => $validated['summary'],
+                        'description' => $validated['description'] ?? null,
+                        'status' => $validated['status'],
+                        'assignee' => $validated['assignee'],
+                        'reporter' => $validated['reporter'],
+                        'created_at' => $validated['created_at'],
+                        'completed_at' => $validated['completed_at'],
+                        'sprint_id' => $validated['sprint_id'],
+                        'story_points' => $validated['story_points'],
+                        'updated_at' => now(),
+                    ]
+                );
+            }
+
+            return response()->json([
+                'status' => 'recorded',
+                'id' => Metric::max('id'),
+                'type' => 'jira-issue',
+                'issue_key' => $validated['issue_key'],
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to record Jira issue',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * CAPTURAR SPRINT DE JIRA
+     * Registra información del sprint actual
+     */
+    public function recordJiraSprint(Request $request)
+    {
+        $validated = $request->validate([
+            'tool' => 'required|string|in:jira,jenkins',
+            'sprint_id' => 'required|integer',
+            'sprint_name' => 'required|string',
+            'start_date' => 'required|date_format:Y-m-d',
+            'end_date' => 'required|date_format:Y-m-d',
+            'goal' => 'nullable|string',
+            'state' => 'required|string|in:future,active,closed',
+        ]);
+
+        try {
+            Metric::create([
+                'type' => 'jira-sprint',
+                'tool' => $validated['tool'],
+                'data' => json_encode($validated),
+                'timestamp' => now(),
+            ]);
+
+            return response()->json([
+                'status' => 'recorded',
+                'id' => Metric::max('id'),
+                'type' => 'jira-sprint',
+                'sprint_name' => $validated['sprint_name'],
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to record Jira sprint',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * OBTENER ISSUES ASOCIADOS AL COMMIT ACTUAL
+     * Busca en la rama/commit message y devuelve issues relacionados
+     * Ejemplo: Si el commit message es "KAN-1: Update controller"
+     * extrae "KAN-1" y busca ese issue
+     */
+    public function getRelatedJiraIssues(Request $request)
+    {
+        $validated = $request->validate([
+            'commit_message' => 'required|string',
+            'branch_name' => 'required|string',
+        ]);
+
+        try {
+            $issues = [];
+
+            // 1. Buscar en el commit message (patrón: KAN-123, PROJ-456, etc)
+            preg_match_all('/([A-Z]+-\d+)/', $validated['commit_message'], $matches);
+            $issuesFromMessage = array_unique($matches[1] ?? []);
+
+            // 2. Buscar en el branch name (patrón: feature/KAN-123-description)
+            preg_match_all('/([A-Z]+-\d+)/', $validated['branch_name'], $branchMatches);
+            $issuesFromBranch = array_unique($branchMatches[1] ?? []);
+
+            // 3. Combinar y deduplicar
+            $allIssueKeys = array_unique(array_merge($issuesFromMessage, $issuesFromBranch));
+
+            if (empty($allIssueKeys)) {
+                return response()->json([
+                    'status' => 'no_issues_found',
+                    'message' => 'No Jira issues found in commit message or branch name',
+                    'commit_message' => $validated['commit_message'],
+                    'branch_name' => $validated['branch_name'],
+                ], 200);
+            }
+
+            // 4. Buscar en BD local (si tienes datos previos)
+            $localIssues = DB::table('metrics')
+                ->where('type', 'jira-issue')
+                ->get()
+                ->filter(function ($metric) use ($allIssueKeys) {
+                    $data = json_decode($metric->data, true);
+                    return in_array($data['issue_key'] ?? null, $allIssueKeys);
+                })
+                ->map(function ($metric) {
+                    return json_decode($metric->data, true);
+                })
+                ->values();
+
+            return response()->json([
+                'status' => 'found',
+                'issue_keys_found' => $allIssueKeys,
+                'issues_from_db' => $localIssues,
+                'count' => count($localIssues),
+            ], 200);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to get related Jira issues',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * INTEGRACIÓN JIRA API (Opcional)
+     * Si tienes acceso a la API de Jira, obtén datos directamente desde allí
+     * Necesitas: JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN en .env
+     */
+    public function fetchJiraIssueFromAPI(Request $request)
+    {
+        $validated = $request->validate([
+            'issue_key' => 'required|string', // KAN-1, KAN-2, etc
+        ]);
+
+        try {
+            $jiraUrl = env('JIRA_URL');
+            $jiraUsername = env('JIRA_USERNAME');
+            $jiraApiToken = env('JIRA_API_TOKEN');
+
+            if (!$jiraUrl || !$jiraUsername || !$jiraApiToken) {
+                return response()->json([
+                    'error' => 'Jira API credentials not configured',
+                    'message' => 'Set JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN in .env',
+                ], 400);
+            }
+
+            // Llamar a Jira API
+            $response = Http::withBasicAuth($jiraUsername, $jiraApiToken)
+                ->get("{$jiraUrl}/rest/api/3/issue/{$validated['issue_key']}");
+
+            if ($response->failed()) {
+                return response()->json([
+                    'error' => 'Failed to fetch from Jira API',
+                    'status' => $response->status(),
+                ], $response->status());
+            }
+
+            $issueData = $response->json();
+
+            // Extraer datos importantes
+            $extractedData = [
+                'tool' => 'jira-api',
+                'issue_key' => $issueData['key'],
+                'issue_type' => $issueData['fields']['issuetype']['name'] ?? 'Unknown',
+                'summary' => $issueData['fields']['summary'] ?? '',
+                'description' => $issueData['fields']['description'] ?? '',
+                'status' => $issueData['fields']['status']['name'] ?? 'Unknown',
+                'assignee' => $issueData['fields']['assignee']['displayName'] ?? 'Unassigned',
+                'reporter' => $issueData['fields']['reporter']['displayName'] ?? 'Unknown',
+                'created_at' => date('Y-m-d H:i:s', strtotime($issueData['fields']['created'] ?? now())),
+                'updated_at' => date('Y-m-d H:i:s', strtotime($issueData['fields']['updated'] ?? now())),
+                'story_points' => $issueData['fields']['customfield_10016'] ?? null, // Campo personalizado
+                'raw_data' => $issueData,
+            ];
+
+            // Guardar en BD
+            Metric::create([
+                'type' => 'jira-issue-api',
+                'tool' => 'jira-api',
+                'data' => json_encode($extractedData),
+                'timestamp' => now(),
+            ]);
+
+            return response()->json([
+                'status' => 'fetched_and_recorded',
+                'issue_key' => $extractedData['issue_key'],
+                'issue_type' => $extractedData['issue_type'],
+                'summary' => $extractedData['summary'],
+                'status' => $extractedData['status'],
+                'assignee' => $extractedData['assignee'],
+                'story_points' => $extractedData['story_points'],
+            ], 201);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch Jira issue',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
+     * OBTENER RESUMEN DE JIRA (Velocidad, Burndown, etc)
+     * Calcula métricas de productividad basadas en datos de Jira
+     */
+    public function getJiraSummary(Request $request)
+    {
+        $days = $request->get('days', 30);
+
+        try {
+            // Obtener todos los issues del período
+            $issues = DB::table('metrics')
+                ->where('type', 'jira-issue')
+                ->where('timestamp', '>=', now()->subDays($days))
+                ->get()
+                ->map(function ($metric) {
+                    return json_decode($metric->data, true);
+                });
+
+            // Calcular estadísticas
+            $totalIssues = $issues->count();
+            $completedIssues = $issues->filter(fn($i) => $i['status'] === 'Done')->count();
+            $inProgressIssues = $issues->filter(fn($i) => $i['status'] === 'In Progress')->count();
+            $todoIssues = $issues->filter(fn($i) => $i['status'] === 'To Do')->count();
+
+            $totalStoryPoints = $issues->sum(fn($i) => $i['story_points'] ?? 0);
+            $completedStoryPoints = $issues
+                ->filter(fn($i) => $i['status'] === 'Done')
+                ->sum(fn($i) => $i['story_points'] ?? 0);
+
+            // Calcular velocity (story points por día)
+            $velocity = $days > 0 ? round($completedStoryPoints / $days, 2) : 0;
+
+            // Calcular lead time promedio por issue
+            $leadTimes = $issues
+                ->filter(fn($i) => $i['completed_at'] && $i['created_at'])
+                ->map(function ($i) {
+                    $created = new \DateTime($i['created_at']);
+                    $completed = new \DateTime($i['completed_at']);
+                    return $completed->diff($created)->days;
+                });
+
+            $avgLeadTime = $leadTimes->isNotEmpty() ? round($leadTimes->avg(), 2) : 0;
+
+            return response()->json([
+                'period_days' => $days,
+                'issues' => [
+                    'total' => $totalIssues,
+                    'completed' => $completedIssues,
+                    'in_progress' => $inProgressIssues,
+                    'todo' => $todoIssues,
+                    'completion_rate_percent' => $totalIssues > 0 
+                        ? round(($completedIssues / $totalIssues) * 100, 2) 
+                        : 0,
+                ],
+                'story_points' => [
+                    'total' => $totalStoryPoints,
+                    'completed' => $completedStoryPoints,
+                    'pending' => $totalStoryPoints - $completedStoryPoints,
+                    'completion_percent' => $totalStoryPoints > 0 
+                        ? round(($completedStoryPoints / $totalStoryPoints) * 100, 2) 
+                        : 0,
+                ],
+                'velocity' => [
+                    'story_points_per_day' => $velocity,
+                    'issues_per_day' => round($totalIssues / $days, 2),
+                ],
+                'lead_time' => [
+                    'average_days' => $avgLeadTime,
+                    'total_measured' => count($leadTimes),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to calculate Jira summary',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
      // ============================================
     // NUEVOS ENDPOINTS PARA GITHUB
     // ============================================

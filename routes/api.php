@@ -14,7 +14,29 @@ Route::prefix('metrics')
 
         Route::post('/github-commit', [MetricasController::class, 'captureGithubCommit']);
         Route::post('/github-pr', [MetricasController::class, 'captureGithubPR']);
-        Route::post('/jira-issue', [MetricasController::class, 'captureJiraIssue']);
+        // Registrar un issue de Jira
+        Route::post('/metrics/jira-issue', [MetricsController::class, 'recordJiraIssue'])
+            ->name('metrics.jira-issue');
+
+        // Registrar un sprint de Jira
+        Route::post('/metrics/jira-sprint', [MetricsController::class, 'recordJiraSprint'])
+            ->name('metrics.jira-sprint');
+
+        // ============================================================================
+        // JIRA DATA RETRIEVAL
+        // ============================================================================
+
+        // Obtener issues relacionados al commit (analiza commit message y branch)
+        Route::post('/metrics/jira-issues/related', [MetricsController::class, 'getRelatedJiraIssues'])
+            ->name('metrics.jira-issues.related');
+
+        // Obtener un issue directamente desde Jira API
+        Route::post('/metrics/jira-issue/fetch', [MetricsController::class, 'fetchJiraIssueFromAPI'])
+            ->name('metrics.jira-issue.fetch');
+
+        // Obtener resumen de Jira (velocidad, burndown, etc)
+        Route::get('/metrics/jira-summary', [MetricsController::class, 'getJiraSummary'])
+            ->name('metrics.jira-summary');
 
         Route::get('/metrics/prometheus', [MetricasController::class, 'prometheusMetrics']);
 
