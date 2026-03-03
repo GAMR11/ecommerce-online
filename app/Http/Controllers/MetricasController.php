@@ -21,14 +21,14 @@ class MetricasController extends Controller
      */
     public function captureGithubCommit(Request $request)
     {
-        // $validated = $request->validate([
-            // 'tool' => 'required|string',
-            // 'commit_sha' => 'required|string',
-            // 'branch' => 'required|string',
-            // 'author' => 'required|string',
-            // 'message' => 'nullable|string',
-            // 'timestamp' => 'required|date_format:Y-m-d H:i:s'
-        // ]);
+        $validated = $request->validate([
+            'tool' => 'required|string',
+            'commit_sha' => 'required|string',
+            'branch' => 'required|string',
+            'author' => 'required|string',
+            'message' => 'nullable|string',
+            'timestamp' => 'required|date_format:Y-m-d H:i:s'
+        ]);
         
         $metric = Metric::create([
             'type' => 'github_commit',
@@ -50,16 +50,16 @@ class MetricasController extends Controller
      */
     public function captureGithubPR(Request $request)
     {
-        // $validated = $request->validate([
-        //     'pr_number' => 'required|integer',
-        //     'title' => 'required|string',
-        //     'branch' => 'nullable|string',
-        //     'author' => 'required|string',
-        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
-        //     'merged_at' => 'nullable|date_format:Y-m-d H:i:s',
-        //     'review_count' => 'nullable|integer',
-        //     'commits_count' => 'nullable|integer',
-        // ]);
+        $validated = $request->validate([
+            'pr_number' => 'required|integer',
+            'title' => 'required|string',
+            'branch' => 'nullable|string',
+            'author' => 'required|string',
+            'created_at' => 'required|date_format:Y-m-d H:i:s',
+            'merged_at' => 'nullable|date_format:Y-m-d H:i:s',
+            'review_count' => 'nullable|integer',
+            'commits_count' => 'nullable|integer',
+        ]);
         
         // Calcular tiempo de merge si existe
         if ($validated['merged_at']) {
@@ -92,18 +92,18 @@ class MetricasController extends Controller
      */
     public function captureJiraIssue(Request $request)
     {
-        // $validated = $request->validate([
-        //     'issue_key' => 'required|string',      // ej: KAN-1
-        //     'issue_type' => 'required|string',     // Task, Bug, Feature, etc
-        //     'summary' => 'required|string',
-        //     'status' => 'required|string',         // To Do, In Progress, Done, etc
-        //     'assignee' => 'nullable|string',
-        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
-        //     'updated_at' => 'nullable|date_format:Y-m-d H:i:s',
-        //     'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
-        //     'story_points' => 'nullable|integer',
-        //     'sprint_name' => 'nullable|string'
-        // ]);
+        $validated = $request->validate([
+            'issue_key' => 'required|string',      // ej: KAN-1
+            'issue_type' => 'required|string',     // Task, Bug, Feature, etc
+            'summary' => 'required|string',
+            'status' => 'required|string',         // To Do, In Progress, Done, etc
+            'assignee' => 'nullable|string',
+            'created_at' => 'required|date_format:Y-m-d H:i:s',
+            'updated_at' => 'nullable|date_format:Y-m-d H:i:s',
+            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
+            'story_points' => 'nullable|integer',
+            'sprint_name' => 'nullable|string'
+        ]);
         
         // Calcular tiempo de completación
         if ($validated['completed_at']) {
