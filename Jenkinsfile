@@ -241,7 +241,7 @@ pipeline {
                             
                             def payload = JsonOutput.toJson(jiraMetric)
                             // Enviamos al endpoint genérico de métricas
-                            bat "curl -s -X POST ${env.APP_URL}/api/metrics -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
+                            bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
                         }
                     }
                 }
