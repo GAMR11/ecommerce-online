@@ -12,6 +12,10 @@ Route::prefix('metrics')
     ->middleware('metrics.api')
     ->group(function () {
 
+        Route::post('/github-commit', [MetricasController::class, 'captureGithubCommit']);
+        Route::post('/github-pr', [MetricasController::class, 'captureGithubPR']);
+        Route::post('/jira-issue', [MetricasController::class, 'captureJiraIssue']);
+
         Route::get('/metrics/prometheus', [MetricasController::class, 'prometheusMetrics']);
 
         // Almacenar métricas

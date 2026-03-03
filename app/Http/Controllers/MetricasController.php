@@ -10,6 +10,123 @@ use Carbon\Carbon;
 
 class MetricasController extends Controller
 {
+
+     // ============================================
+    // NUEVOS ENDPOINTS PARA GITHUB
+    // ============================================
+    
+    /**
+     * Capturar datos de commit desde GitHub
+     * POST /api/metrics/github-commit
+     */
+    public function captureGithubCommit(Request $request)
+    {
+        // $validated = $request->validate([
+            // 'tool' => 'required|string',
+            // 'commit_sha' => 'required|string',
+            // 'branch' => 'required|string',
+            // 'author' => 'required|string',
+            // 'message' => 'nullable|string',
+            // 'timestamp' => 'required|date_format:Y-m-d H:i:s'
+        // ]);
+        
+        $metric = Metric::create([
+            'type' => 'github_commit',
+            'tool' => 'github',
+            'data' => $validated,
+            'timestamp' => $validated['timestamp']
+        ]);
+        
+        return response()->json([
+            'status' => 'recorded',
+            'type' => 'github_commit',
+            'id' => $metric->id
+        ], 201);
+    }
+    
+    /**
+     * Capturar datos de Pull Request desde GitHub
+     * POST /api/metrics/github-pr
+     */
+    public function captureGithubPR(Request $request)
+    {
+        // $validated = $request->validate([
+        //     'pr_number' => 'required|integer',
+        //     'title' => 'required|string',
+        //     'branch' => 'nullable|string',
+        //     'author' => 'required|string',
+        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
+        //     'merged_at' => 'nullable|date_format:Y-m-d H:i:s',
+        //     'review_count' => 'nullable|integer',
+        //     'commits_count' => 'nullable|integer',
+        // ]);
+        
+        // Calcular tiempo de merge si existe
+        if ($validated['merged_at']) {
+            $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
+            $mergedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['merged_at']);
+            $validated['time_to_merge_minutes'] = $mergedTime->diffInMinutes($createdTime);
+        }
+        
+        $metric = Metric::create([
+            'type' => 'github_pr',
+            'tool' => 'github',
+            'data' => $validated,
+            'timestamp' => $validated['created_at']
+        ]);
+        
+        return response()->json([
+            'status' => 'recorded',
+            'type' => 'github_pr',
+            'id' => $metric->id
+        ], 201);
+    }
+    
+    // ============================================
+    // NUEVOS ENDPOINTS PARA JIRA
+    // ============================================
+    
+    /**
+     * Capturar datos de Issue desde Jira
+     * POST /api/metrics/jira-issue
+     */
+    public function captureJiraIssue(Request $request)
+    {
+        // $validated = $request->validate([
+        //     'issue_key' => 'required|string',      // ej: KAN-1
+        //     'issue_type' => 'required|string',     // Task, Bug, Feature, etc
+        //     'summary' => 'required|string',
+        //     'status' => 'required|string',         // To Do, In Progress, Done, etc
+        //     'assignee' => 'nullable|string',
+        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
+        //     'updated_at' => 'nullable|date_format:Y-m-d H:i:s',
+        //     'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
+        //     'story_points' => 'nullable|integer',
+        //     'sprint_name' => 'nullable|string'
+        // ]);
+        
+        // Calcular tiempo de completación
+        if ($validated['completed_at']) {
+            $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
+            $completedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['completed_at']);
+            $validated['time_to_complete_hours'] = $createdTime->diffInHours($completedTime);
+        }
+        
+        $metric = Metric::create([
+            'type' => 'jira_issue',
+            'tool' => 'jira',
+            'data' => $validated,
+            'timestamp' => $validated['created_at']
+        ]);
+        
+        return response()->json([
+            'status' => 'recorded',
+            'type' => 'jira_issue',
+            'id' => $metric->id,
+            'issue_key' => $validated['issue_key']
+        ], 201);
+    }
+
     public function prometheusMetrics()
     {
         $tools = ['github-actions', 'jenkins'];
