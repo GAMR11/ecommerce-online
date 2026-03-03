@@ -198,55 +198,57 @@ pipeline {
             }
         }
 
-        // ============================================
-        // STAGE 4: JIRA ISSUE DISCOVERY (AJUSTADO)
-        // ============================================
-        stage('Jira Issue Discovery') {
-            steps {
-                script {
-                    echo '🔗 Analizando tickets de Jira...'
-                    
-                    def jiraPattern = /([A-Z]+-\d+)/
-                    def issues = []
-                    
-                    // Buscar en mensaje de commit y nombre de rama
-                    def msgMatches = (env.GIT_MESSAGE =~ jiraPattern)
-                    while (msgMatches.find()) { issues << msgMatches.group(1) }
-                    
-                    def branchMatches = (env.GIT_BRANCH =~ jiraPattern)
-                    while (branchMatches.find()) { issues << branchMatches.group(1) }
-                    
-                    issues = issues.unique()
+      stage('Jira Issue Discovery') {
+    steps {
+        script {
+            echo '🔗 Analizando tickets de Jira...'
+            
+            // Definimos la función de búsqueda dentro del script pero 
+            // nos aseguramos de que los objetos Matcher no salgan de aquí
+            def findIssues = { String text ->
+                def jiraPattern = /([A-Z]+-\d+)/
+                def found = []
+                def matcher = (text =~ jiraPattern)
+                while (matcher.find()) {
+                    found << matcher.group(1)
+                }
+                return found
+            }
 
-                    if (issues.isEmpty()) {
-                        echo 'ℹ️ No se detectaron llaves de Jira.'
-                    } else {
-                        issues.each { issueKey ->
-                            echo "🚀 Registrando métrica para ticket: ${issueKey}"
-                            
-                            // Creamos un objeto que el controlador guardará en la columna 'data'
-                            def jiraMetric = [
-                                type: 'jira-issue',
-                                tool: env.TOOL_NAME,
-                                timestamp: env.PIPELINE_START_ISO,
-                                data: [
-                                    issue_key: issueKey,
-                                    summary: env.GIT_MESSAGE,
-                                    assignee: env.GIT_AUTHOR,
-                                    branch: env.GIT_BRANCH,
-                                    commit_sha: env.GIT_COMMIT_SHA,
-                                    status: 'In Progress'
-                                ]
-                            ]
-                            
-                            def payload = JsonOutput.toJson(jiraMetric)
-                            // Enviamos al endpoint genérico de métricas
-                            bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
-                        }
-                    }
+            // Capturamos las llaves en listas simples (que sí son serializables)
+            def issues = []
+            issues.addAll(findIssues(env.GIT_MESSAGE ?: ""))
+            issues.addAll(findIssues(env.GIT_BRANCH ?: ""))
+            issues = issues.unique()
+
+            if (issues.isEmpty()) {
+                echo 'ℹ️ No se detectaron llaves de Jira.'
+            } else {
+                issues.each { issueKey ->
+                    echo "🚀 Registrando métrica para ticket: ${issueKey}"
+                    
+                    def jiraMetric = [
+                        type: 'jira-issue',
+                        tool: env.TOOL_NAME,
+                        timestamp: env.PIPELINE_START_ISO,
+                        data: [
+                            issue_key: issueKey,
+                            summary: env.GIT_MESSAGE,
+                            assignee: env.GIT_AUTHOR,
+                            branch: env.GIT_BRANCH,
+                            commit_sha: env.GIT_COMMIT_SHA,
+                            status: 'In Progress'
+                        ]
+                    ]
+                    
+                    def payload = groovy.json.JsonOutput.toJson(jiraMetric)
+                    // Importante: El replace de comillas es vital para el bat de Windows
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
                 }
             }
         }
+    }
+}
         // ========================================
         // STAGE 5: CAPTURAR DATOS DE GITHUB (OPCIONAL)
         // ========================================
