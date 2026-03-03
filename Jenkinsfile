@@ -78,6 +78,48 @@ pipeline {
                     echo '🏗️ Levantando entorno Docker...'
                     bat 'docker compose up -d --build'
 
+                    echo '🔧 Ajustando permisos...'
+                    bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache'
+
+                    // 1. Crear el archivo de migración dinámicamente si no existe
+                    echo '📝 Generando archivo de migración para jira_issues...'
+                    // Usamos un pequeño script de PHP para verificar si ya existe una migración con ese nombre
+                    bat """
+                            docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
+                        """
+
+                    // 2. Insertar el contenido de la tabla en el archivo recién creado
+                    // Nota: Esto sobreescribirá el contenido para asegurar que tenga tus campos
+                    echo '🛠️ Definiendo estructura de la tabla jira_issues...'
+                    def migrationCode = """<?php
+                        use Illuminate\\Database\\Migrations\\Migration;
+                        use Illuminate\\Database\\Schema\\Blueprint;
+                        use Illuminate\\Support\\Facades\\Schema;
+
+                        return new class extends Migration {
+                            public function up(): void {
+                                Schema::create('jira_issues', function (Blueprint \$table) {
+                                    \$table->id();
+                                    \$table->string('jira_key')->unique();
+                                    \$table->string('issue_type')->nullable();
+                                    \$table->string('summary')->nullable();
+                                    \$table->text('description')->nullable();
+                                    \$table->string('status')->nullable();
+                                    \$table->string('assignee')->nullable();
+                                    \$table->string('reporter')->nullable();
+                                    \$table->string('sprint_id')->nullable();
+                                    \$table->float('story_points')->nullable();
+                                    \$table->timestamp('created_at')->nullable();
+                                    \$table->timestamp('completed_at')->nullable();
+                                    \$table->timestamp('updated_at')->useCurrent();
+                                });
+                            }
+                            public function down(): void { Schema::dropIfExists('jira_issues'); }
+                        };"""
+                    // Escribimos el código en el archivo dentro del contenedor
+                    // Buscamos el nombre del archivo generado (que tiene el timestamp)
+                    bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; file_put_contents(\$file, base64_decode('" + migrationCode.bytes.encodeBase64().toString() + "'));\""
+
                     echo '📊 Migraciones y Limpieza...'
                     bat 'docker compose exec -T app php artisan migrate --force --seed'
                     bat 'docker compose exec -T app php artisan cache:clear'
@@ -198,29 +240,29 @@ pipeline {
             }
         }
 
-       stage('Jira Issue Discovery') {
+        stage('Jira Issue Discovery') {
             steps {
                 script {
                     echo '🔗 Analizando tickets de Jira...'
                     def jiraPattern = /([A-Z]+-\d+)/
                     def issues = []
-                    
+
                     def msgMatches = (env.GIT_MESSAGE =~ jiraPattern)
                     while (msgMatches.find()) { issues << msgMatches.group(1) }
-                    
+
                     if (issues.isEmpty()) {
                         echo 'ℹ️ No se detectaron issues.'
                     } else {
                         issues.unique().each { issueKey ->
                             echo "🚀 Procesando: ${issueKey}"
-                            
+
                             // Usamos un bloque try/catch de Groovy para que el pipeline NO falle si el CURL da error
                             try {
                                 def fetchData = JsonOutput.toJson([tool: env.TOOL_NAME, issue_key: issueKey, timestamp: env.PIPELINE_START_ISO])
                                 // El "|| exit 0" al final del comando bat evita que Jenkins marque error si el curl falla
                                 bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch -H \"Content-Type: application/json\" -d \"${fetchData.replace('"', '\\"')}\" || exit 0"
                             } catch (Exception e) {
-                                echo "⚠️ No se pudo conectar con el endpoint de Jira."
+                                echo '⚠️ No se pudo conectar con el endpoint de Jira.'
                             }
                         }
                     }
