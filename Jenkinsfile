@@ -152,7 +152,7 @@ pipeline {
                         commit_timestamp: env.COMMIT_TIME_ISO,
                         deployment_timestamp: nowIso,
                         lead_time_seconds: leadTimeSeconds,
-                        lead_time_minutes: Math.round(leadTimeSeconds / 60),
+                        lead_time_minutes: (leadTimeSeconds / 60).toInteger(),
                         timestamp: nowIso
                     ])
 
