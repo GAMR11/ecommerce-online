@@ -7,61 +7,79 @@
       "type": "timeseries",
       "targets": [
         {
-          "rawSql": "SELECT timestamp AS time, count(*) as value FROM metrics WHERE type = 'deployment-result' AND JSON_EXTRACT(data, '$.is_failure') = false GROUP BY 1 ORDER BY 1",
+          "rawSql": "SELECT DATE(timestamp) as time, COUNT(*) as value FROM metrics WHERE type = 'deployment' AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.status')) = 'SUCCESS' GROUP BY DATE(timestamp) ORDER BY time",
+          "format": "time_series"
+        }
+      ]
+    },
+    {
+      "title": "Commits por Día",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "type": "timeseries",
+      "targets": [
+        {
+          "rawSql": "SELECT DATE(timestamp) as time, COUNT(*) as value FROM metrics WHERE type = 'github-commit' GROUP BY DATE(timestamp) ORDER BY time",
           "format": "time_series"
         }
       ]
     },
     {
       "title": "Lead Time for Changes (Minutos)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "type": "stat",
       "targets": [
         {
-          "rawSql": "SELECT avg(CAST(JSON_EXTRACT(data, '$.lead_time_seconds') AS UNSIGNED) / 60) FROM metrics WHERE type = 'leadtime'",
+          "rawSql": "SELECT AVG(CAST(JSON_EXTRACT(data, '$.lead_time_minutes') AS UNSIGNED)) as value FROM metrics WHERE type = 'lead-time'",
           "format": "table"
         }
       ]
     },
     {
       "title": "Change Failure Rate (%)",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "type": "gauge",
       "fieldConfig": {
         "defaults": {
-          "min": 0, "max": 100,
+          "min": 0,
+          "max": 100,
           "thresholds": {
             "mode": "absolute",
             "steps": [
-              {"color": "green", "value": null},
-              {"color": "yellow", "value": 15},
-              {"color": "red", "value": 30}
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 15 },
+              { "color": "red", "value": 30 }
             ]
           }
         }
       },
       "targets": [
         {
-          "rawSql": "SELECT (SUM(CASE WHEN JSON_EXTRACT(data, '$.is_failure') = true THEN 1 ELSE 0 END) / COUNT(*)) * 100 FROM metrics WHERE type = 'deployment-result'",
+          "rawSql": "SELECT (SUM(CASE WHEN JSON_UNQUOTE(JSON_EXTRACT(data, '$.status')) = 'FAILURE' THEN 1 ELSE 0 END) / COUNT(*)) * 100 as value FROM metrics WHERE type = 'deployment'",
           "format": "table"
         }
       ]
     },
     {
       "title": "Mean Time to Recovery (MTTR - Minutos)",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "type": "stat",
       "description": "Tiempo promedio para resolver incidentes",
       "targets": [
         {
-          "rawSql": "SELECT AVG(CAST(JSON_EXTRACT(data, '$.duration_minutes') AS UNSIGNED)) FROM metrics WHERE type = 'incident' AND JSON_EXTRACT(data, '$.status') = 'resolved'",
+          "rawSql": "SELECT AVG(CAST(JSON_EXTRACT(data, '$.duration_minutes') AS UNSIGNED)) as value FROM metrics WHERE type = 'incident' AND JSON_UNQUOTE(JSON_EXTRACT(data, '$.status')) = 'resolved'",
           "format": "table"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            { "type": "special", "options": { "match": "null", "result": { "text": "0" } } }
+            {
+              "type": "special",
+              "options": {
+                "match": "null",
+                "result": { "text": "0" }
+              }
+            }
           ]
         }
       }
