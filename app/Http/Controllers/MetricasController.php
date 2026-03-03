@@ -17,45 +17,45 @@ class MetricasController extends Controller
      */
     public function recordJiraIssue(Request $request)
     {
-        $validated = $request->validate([
-            'tool' => 'required|string|in:jira,jenkins',
-            'issue_key' => 'required|string', // KAN-1, KAN-2, etc
-            'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
-            'summary' => 'required|string',
-            'description' => 'nullable|string',
-            'status' => 'required|string|in:To Do,In Progress,In Review,Done',
-            'assignee' => 'required|string',
-            'reporter' => 'required|string',
-            'created_at' => 'required|date_format:Y-m-d H:i:s',
-            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
-            'sprint_id' => 'nullable|integer',
-            'story_points' => 'nullable|integer',
-        ]);
+        // $validated = $request->validate([
+        //     'tool' => 'required|string|in:jira,jenkins',
+        //     'issue_key' => 'required|string', // KAN-1, KAN-2, etc
+        //     'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
+        //     'summary' => 'required|string',
+        //     'description' => 'nullable|string',
+        //     'status' => 'required|string|in:To Do,In Progress,In Review,Done',
+        //     'assignee' => 'required|string',
+        //     'reporter' => 'required|string',
+        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
+        //     'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
+        //     'sprint_id' => 'nullable|integer',
+        //     'story_points' => 'nullable|integer',
+        // ]);
 
         try {
             // Guardar en tabla metrics (general)
             Metric::create([
                 'type' => 'jira-issue',
-                'tool' => $validated['tool'],
-                'data' => json_encode($validated),
+                'tool' => 'jira',
+                'data' => json_encode($request->all()),
                 'timestamp' => now(),
             ]);
 
             // Opcional: Guardar en tabla jira_issues (si existe)
             if (DB::table('jira_issues')->exists()) {
                 DB::table('jira_issues')->updateOrInsert(
-                    ['jira_key' => $validated['issue_key']],
+                    ['jira_key' => $request->issue_key],
                     [
-                        'issue_type' => $validated['issue_type'],
-                        'summary' => $validated['summary'],
-                        'description' => $validated['description'] ?? null,
-                        'status' => $validated['status'],
-                        'assignee' => $validated['assignee'],
-                        'reporter' => $validated['reporter'],
-                        'created_at' => $validated['created_at'],
-                        'completed_at' => $validated['completed_at'],
-                        'sprint_id' => $validated['sprint_id'],
-                        'story_points' => $validated['story_points'],
+                        'issue_type' => $request->issue_type,
+                        'summary' => $request->summary,
+                        'description' => $request->description ?? null,
+                        'status' => $request->status,
+                        'assignee' => $request->assignee,
+                        'reporter' => $request->reporter,
+                        'created_at' => $request->created_at,
+                        'completed_at' => $request->completed_at,
+                        'sprint_id' => $request->sprint_id,
+                        'story_points' => $request->story_points,
                         'updated_at' => now(),
                     ]
                 );
@@ -65,7 +65,7 @@ class MetricasController extends Controller
                 'status' => 'recorded',
                 'id' => Metric::max('id'),
                 'type' => 'jira-issue',
-                'issue_key' => $validated['issue_key'],
+                'issue_key' => $request->issue_key,
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
@@ -81,21 +81,21 @@ class MetricasController extends Controller
      */
     public function recordJiraSprint(Request $request)
     {
-        $validated = $request->validate([
-            'tool' => 'required|string|in:jira,jenkins',
-            'sprint_id' => 'required|integer',
-            'sprint_name' => 'required|string',
-            'start_date' => 'required|date_format:Y-m-d',
-            'end_date' => 'required|date_format:Y-m-d',
-            'goal' => 'nullable|string',
-            'state' => 'required|string|in:future,active,closed',
-        ]);
+        // $validated = $request->validate([
+        //     'tool' => 'required|string|in:jira,jenkins',
+        //     'sprint_id' => 'required|integer',
+        //     'sprint_name' => 'required|string',
+        //     'start_date' => 'required|date_format:Y-m-d',
+        //     'end_date' => 'required|date_format:Y-m-d',
+        //     'goal' => 'nullable|string',
+        //     'state' => 'required|string|in:future,active,closed',
+        // ]);
 
         try {
             Metric::create([
                 'type' => 'jira-sprint',
-                'tool' => $validated['tool'],
-                'data' => json_encode($validated),
+                'tool' => $request->tool,
+                'data' => json_encode($request->all()),
                 'timestamp' => now(),
             ]);
 
@@ -103,7 +103,7 @@ class MetricasController extends Controller
                 'status' => 'recorded',
                 'id' => Metric::max('id'),
                 'type' => 'jira-sprint',
-                'sprint_name' => $validated['sprint_name'],
+                'sprint_name' => $request->sprint_name,
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
@@ -121,20 +121,20 @@ class MetricasController extends Controller
      */
     public function getRelatedJiraIssues(Request $request)
     {
-        $validated = $request->validate([
-            'commit_message' => 'required|string',
-            'branch_name' => 'required|string',
-        ]);
+        // $validated = $request->validate([
+        //     'commit_message' => 'required|string',
+        //     'branch_name' => 'required|string',
+        // ]);
 
         try {
             $issues = [];
 
             // 1. Buscar en el commit message (patrón: KAN-123, PROJ-456, etc)
-            preg_match_all('/([A-Z]+-\d+)/', $validated['commit_message'], $matches);
+            preg_match_all('/([A-Z]+-\d+)/', $request->commit_message, $matches);
             $issuesFromMessage = array_unique($matches[1] ?? []);
 
             // 2. Buscar en el branch name (patrón: feature/KAN-123-description)
-            preg_match_all('/([A-Z]+-\d+)/', $validated['branch_name'], $branchMatches);
+            preg_match_all('/([A-Z]+-\d+)/', $request->branch_name, $branchMatches);
             $issuesFromBranch = array_unique($branchMatches[1] ?? []);
 
             // 3. Combinar y deduplicar
@@ -144,8 +144,8 @@ class MetricasController extends Controller
                 return response()->json([
                     'status' => 'no_issues_found',
                     'message' => 'No Jira issues found in commit message or branch name',
-                    'commit_message' => $validated['commit_message'],
-                    'branch_name' => $validated['branch_name'],
+                    'commit_message' => $request->commit_message,
+                    'branch_name' => $request->branch_name,
                 ], 200);
             }
 
@@ -183,9 +183,9 @@ class MetricasController extends Controller
      */
     public function fetchJiraIssueFromAPI(Request $request)
     {
-        $validated = $request->validate([
-            'issue_key' => 'required|string', // KAN-1, KAN-2, etc
-        ]);
+        // $validated = $request->validate([
+        //     'issue_key' => 'required|string', // KAN-1, KAN-2, etc
+        // ]);
 
         try {
             $jiraUrl = env('JIRA_URL');
@@ -201,7 +201,7 @@ class MetricasController extends Controller
 
             // Llamar a Jira API
             $response = Http::withBasicAuth($jiraUsername, $jiraApiToken)
-                ->get("{$jiraUrl}/rest/api/3/issue/{$validated['issue_key']}");
+                ->get("{$jiraUrl}/rest/api/3/issue/{$request->issue_key}");
 
             if ($response->failed()) {
                 return response()->json([
@@ -303,16 +303,16 @@ class MetricasController extends Controller
                     'completed' => $completedIssues,
                     'in_progress' => $inProgressIssues,
                     'todo' => $todoIssues,
-                    'completion_rate_percent' => $totalIssues > 0 
-                        ? round(($completedIssues / $totalIssues) * 100, 2) 
+                    'completion_rate_percent' => $totalIssues > 0
+                        ? round(($completedIssues / $totalIssues) * 100, 2)
                         : 0,
                 ],
                 'story_points' => [
                     'total' => $totalStoryPoints,
                     'completed' => $completedStoryPoints,
                     'pending' => $totalStoryPoints - $completedStoryPoints,
-                    'completion_percent' => $totalStoryPoints > 0 
-                        ? round(($completedStoryPoints / $totalStoryPoints) * 100, 2) 
+                    'completion_percent' => $totalStoryPoints > 0
+                        ? round(($completedStoryPoints / $totalStoryPoints) * 100, 2)
                         : 0,
                 ],
                 'velocity' => [
@@ -334,7 +334,7 @@ class MetricasController extends Controller
      // ============================================
     // NUEVOS ENDPOINTS PARA GITHUB
     // ============================================
-    
+
     /**
      * Capturar datos de commit desde GitHub
      * POST /api/metrics/github-commit
@@ -349,21 +349,21 @@ class MetricasController extends Controller
             'message' => 'nullable|string',
             'timestamp' => 'required|date_format:Y-m-d H:i:s'
         ]);
-        
+
         $metric = Metric::create([
             'type' => 'github_commit',
             'tool' => 'github',
             'data' => $validated,
             'timestamp' => $validated['timestamp']
         ]);
-        
+
         return response()->json([
             'status' => 'recorded',
             'type' => 'github_commit',
             'id' => $metric->id
         ], 201);
     }
-    
+
     /**
      * Capturar datos de Pull Request desde GitHub
      * POST /api/metrics/github-pr
@@ -380,21 +380,21 @@ class MetricasController extends Controller
             'review_count' => 'nullable|integer',
             'commits_count' => 'nullable|integer',
         ]);
-        
+
         // Calcular tiempo de merge si existe
         if ($validated['merged_at']) {
             $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
             $mergedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['merged_at']);
             $validated['time_to_merge_minutes'] = $mergedTime->diffInMinutes($createdTime);
         }
-        
+
         $metric = Metric::create([
             'type' => 'github_pr',
             'tool' => 'github',
             'data' => $validated,
             'timestamp' => $validated['created_at']
         ]);
-        
+
         return response()->json([
             'status' => 'recorded',
             'type' => 'github_pr',
@@ -405,7 +405,7 @@ class MetricasController extends Controller
     // ============================================
     // NUEVOS ENDPOINTS PARA JIRA
     // ============================================
-    
+
     /**
      * Capturar datos de Issue desde Jira
      * POST /api/metrics/jira-issue
@@ -424,21 +424,21 @@ class MetricasController extends Controller
             'story_points' => 'nullable|integer',
             'sprint_name' => 'nullable|string'
         ]);
-        
+
         // Calcular tiempo de completación
         if ($validated['completed_at']) {
             $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
             $completedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['completed_at']);
             $validated['time_to_complete_hours'] = $createdTime->diffInHours($completedTime);
         }
-        
+
         $metric = Metric::create([
             'type' => 'jira_issue',
             'tool' => 'jira',
             'data' => $validated,
             'timestamp' => $validated['created_at']
         ]);
-        
+
         return response()->json([
             'status' => 'recorded',
             'type' => 'jira_issue',
@@ -503,7 +503,7 @@ class MetricasController extends Controller
 
             if ($type === 'leadtime') {
                 $now = Carbon::now();
-                
+
                 // Lead Time Técnico: Desde el commit (eficiencia del dev)
                 if ($request->filled('commit_at')) {
                     $data['lead_time_seconds'] = $now->diffInSeconds(Carbon::parse($request->commit_at));
@@ -516,11 +516,11 @@ class MetricasController extends Controller
             }
 
             $metric = Metric::create([
-            'type' => $type,
-            'tool' => $request->tool,
-            'data' => $data,
-            'timestamp' => $request->timestamp ?? now(),
-        ]);
+                'type' => $type,
+                'tool' => $request->tool,
+                'data' => $data,
+                'timestamp' => $request->timestamp ?? now(),
+            ]);
 
             return response()->json([
                 'status' => 'recorded',
@@ -652,7 +652,7 @@ class MetricasController extends Controller
                 ->where('timestamp', '>=', $startDate)
                 ->get();
 
-            $recoveryTimes = $resolvedIncidents->map(function($incident) {
+            $recoveryTimes = $resolvedIncidents->map(function ($incident) {
                 $start = Carbon::parse($incident->data['start_time']);
                 $end = Carbon::parse($incident->data['resolution_time']);
                 return $end->diffInSeconds($start);
@@ -836,7 +836,7 @@ class MetricasController extends Controller
             ->where('timestamp', '>=', $startDate)
             ->get();
 
-        $recoveryTimes = $resolvedIncidents->map(function($incident) {
+        $recoveryTimes = $resolvedIncidents->map(function ($incident) {
             $start = Carbon::parse($incident->data['start_time']);
             $end = Carbon::parse($incident->data['resolution_time']);
             return $end->diffInSeconds($start);
