@@ -181,19 +181,42 @@ class MetricasController extends Controller
     public function getJiraCommitStats()
     {
         try {
-            // Obtenemos todas las métricas que sean registros de commits o issues vinculados
             $stats = Metric::where('type', 'jira-issue')
                 ->get()
                 ->map(function ($metric) {
-                    return is_array($metric->data) ? $metric->data : json_decode($metric->data, true);
+                    // 1. Decodificar el JSON de la columna 'data'
+                    $content = is_array($metric->data) ? $metric->data : json_decode($metric->data, true);
+                    
+                    // Manejar posible doble encoding (si se guardó como string JSON)
+                    if (is_string($content)) {
+                        $content = json_decode($content, true);
+                    }
+
+                    // 2. Normalizar: ¿Viene en la raíz o dentro de ['data']?
+                    // Los nuevos registros de Jenkins vienen envueltos en una llave 'data'
+                    $innerData = (isset($content['data']) && is_array($content['data'])) 
+                        ? $content['data'] 
+                        : $content;
+
+                    return [
+                        'issue_key'   => $innerData['issue_key'] ?? null,
+                        'assignee'    => $innerData['assignee'] ?? null,
+                        // Usamos el timestamp de la métrica como fecha de actividad
+                        'activity_at' => $metric->timestamp ?? $metric->created_at,
+                    ];
                 })
+                // 3. Filtrar registros corruptos o sin llave para no ensuciar la estadística
+                ->filter(fn($item) => !empty($item['issue_key']))
                 ->groupBy('issue_key')
                 ->map(function ($group, $key) {
                     return [
-                        'issue_key' => $key,
+                        'issue_key'              => $key,
                         'total_commits_detected' => $group->count(),
-                        'last_activity' => $group->max('created_at'),
-                        'developers' => $group->pluck('assignee')->unique()->values()
+                        'last_activity'          => $group->max('activity_at'),
+                        'developers'             => $group->pluck('assignee')
+                                                        ->filter() // Quita nulos
+                                                        ->unique()
+                                                        ->values()
                     ];
                 })
                 ->values();
