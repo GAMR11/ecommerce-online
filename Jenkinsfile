@@ -73,55 +73,57 @@ pipeline {
         // STAGE 2: BUILD & DEPLOY
         // ============================================
         stage('Build & Deploy (Docker)') {
-            steps {
-                script {
-                    echo '🏗️ Levantando contenedores...'
-                    bat 'docker compose up -d --build'
-                    
-                    echo '🔧 Ajustando permisos (modo preventivo)...'
-                    // Añadimos || exit 0 para que si chmod falla en algún archivo, el pipeline siga
-                    bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache || exit 0'
+    steps {
+        script {
+            echo '🏗️ Levantando contenedores...'
+            bat 'docker compose up -d --build'
+            
+            echo '🔧 Ajustando permisos...'
+            bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache || exit 0'
 
-                    echo '📝 Verificando/Generando migración...'
-                    bat """
-                        docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
-                    """
+            echo '📝 Verificando/Generando migración...'
+            bat """
+                docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
+            """
 
-                    echo '🛠️ Inyectando estructura de tabla...'
-                    def migrationCode = """<?php
-                    use Illuminate\\Database\\Migrations\\Migration;
-                    use Illuminate\\Database\\Schema\\Blueprint;
-                    use Illuminate\\Support\\Facades\\Schema;
+            echo '🛠️ Inyectando estructura de tabla...'
+            // Definimos el código sin caracteres extraños para que el CMD no explote
+            def migrationCode = """<?php
+use Illuminate\\Database\\Migrations\\Migration;
+use Illuminate\\Database\\Schema\\Blueprint;
+use Illuminate\\Support\\Facades\\Schema;
 
-                    return new class extends Migration {
-                        public function up(): void {
-                            if (!Schema::hasTable('jira_issues')) {
-                                Schema::create('jira_issues', function (Blueprint \$table) {
-                                    \$table->id();
-                                    \$table->string('jira_key')->unique();
-                                    \$table->string('issue_type')->nullable();
-                                    \$table->string('summary')->nullable();
-                                    \$table->text('description')->nullable();
-                                    \$table->string('status')->nullable();
-                                    \$table->string('assignee')->nullable();
-                                    \$table->string('reporter')->nullable();
-                                    \$table->string('sprint_id')->nullable();
-                                    \$table->float('story_points')->nullable();
-                                    \$table->timestamp('created_at')->nullable();
-                                    \$table->timestamp('completed_at')->nullable();
-                                    \$table->timestamp('updated_at')->useCurrent();
-                                });
-                            }
-                        }
-                        public function down(): void { Schema::dropIfExists('jira_issues'); }
-                    };"""
-                        bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; file_put_contents(\$file, base64_decode('" + migrationCode.bytes.encodeBase64().toString() + "'));\""
+return new class extends Migration {
+    public function up(): void {
+        if (!Schema::hasTable('jira_issues')) {
+            Schema::create('jira_issues', function (Blueprint \$table) {
+                \$table->id();
+                \$table->string('jira_key')->unique();
+                \$table->string('issue_type')->nullable();
+                \$table->string('summary')->nullable();
+                \$table->text('description')->nullable();
+                \$table->string('status')->nullable();
+                \$table->string('assignee')->nullable();
+                \$table->string('reporter')->nullable();
+                \$table->string('sprint_id')->nullable();
+                \$table->float('story_points')->nullable();
+                \$table->timestamp('created_at')->nullable();
+                \$table->timestamp('completed_at')->nullable();
+                \$table->timestamp('updated_at')->useCurrent();
+            });
+        }
+    }
+};"""
+            // Guardamos el código en un archivo temporal en Windows y luego lo pasamos al contenedor
+            writeFile file: 'migration_temp.php', text: migrationCode
+            bat "docker cp migration_temp.php ecommerce-app:/var/www/migration_temp.php"
+            bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; rename('migration_temp.php', \$file);\""
 
-                        echo '🚀 Ejecutando migración...'
-                        bat 'docker compose exec -T app php artisan migrate --force'
-                    }
-                }
-            }
+            echo '🚀 Ejecutando migración...'
+            bat 'docker compose exec -T app php artisan migrate --force'
+        }
+    }
+}
 
         // ============================================
         // STAGE 3: TESTS
