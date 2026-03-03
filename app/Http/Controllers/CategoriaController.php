@@ -13,26 +13,12 @@ use RealRashid\SweetAlert\Facades\Alert;
 
 class CategoriaController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
     public function index()
     {
         $categorias = Categoria::all();
         return view('categoria.categoria-table',compact('categorias'));
     }
 
-    /**
-     * Show the form for creating a new resource.
-     */
-    public function create()
-    {
-        //
-    }
-
-    /**
-     * Store a newly created resource in storage.
-     */
     public function store(StoreCategoriaRequest $request)
     {
         // Desestructuración de la solicitud
