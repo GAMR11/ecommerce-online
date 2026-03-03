@@ -198,52 +198,29 @@ pipeline {
             }
         }
 
-        stage('Jira Issue Discovery') {
+       stage('Jira Issue Discovery') {
             steps {
                 script {
-                    echo '🔗 Analizando tickets de Jira en el commit...'
-                    
-                    // Regex para encontrar códigos como KAN-123 o PROJ-55
+                    echo '🔗 Analizando tickets de Jira...'
                     def jiraPattern = /([A-Z]+-\d+)/
                     def issues = []
                     
                     def msgMatches = (env.GIT_MESSAGE =~ jiraPattern)
                     while (msgMatches.find()) { issues << msgMatches.group(1) }
                     
-                    def branchMatches = (env.GIT_BRANCH =~ jiraPattern)
-                    while (branchMatches.find()) { issues << branchMatches.group(1) }
-                    
-                    issues = issues.unique()
-
                     if (issues.isEmpty()) {
-                        echo 'ℹ️ No se detectaron llaves de Jira en el mensaje o rama.'
+                        echo 'ℹ️ No se detectaron issues.'
                     } else {
-                        issues.each { issueKey ->
-                            echo "🚀 Procesando Issue: ${issueKey}"
+                        issues.unique().each { issueKey ->
+                            echo "🚀 Procesando: ${issueKey}"
                             
-                            // 1. Intentar FETCH (que el servidor lo traiga de Jira API)
-                            def fetchData = JsonOutput.toJson([
-                                tool: env.TOOL_NAME,
-                                issue_key: issueKey,
-                                timestamp: env.PIPELINE_START_ISO
-                            ])
-                            
+                            // Usamos un bloque try/catch de Groovy para que el pipeline NO falle si el CURL da error
                             try {
-                                // Llamamos a tu endpoint de fetch
-                                bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch -H \"Content-Type: application/json\" -d \"${fetchData.replace('"', '\\"')}\""
+                                def fetchData = JsonOutput.toJson([tool: env.TOOL_NAME, issue_key: issueKey, timestamp: env.PIPELINE_START_ISO])
+                                // El "|| exit 0" al final del comando bat evita que Jenkins marque error si el curl falla
+                                bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch -H \"Content-Type: application/json\" -d \"${fetchData.replace('"', '\\"')}\" || exit 0"
                             } catch (Exception e) {
-                                echo "⚠️ Falló el fetch automático para ${issueKey}. Intentando registro manual..."
-                                
-                                // 2. Fallback: Registro manual básico si el fetch falla
-                                def manualData = JsonOutput.toJson([
-                                    issue_key: issueKey,
-                                    issue_type: 'Task',
-                                    summary: "Linked from Commit: ${env.GIT_MESSAGE}",
-                                    status: 'In Progress',
-                                    assignee: env.GIT_AUTHOR,
-                                    created_at: env.PIPELINE_START_ISO
-                                ])
-                                bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${manualData.replace('"', '\\"')}\""
+                                echo "⚠️ No se pudo conectar con el endpoint de Jira."
                             }
                         }
                     }

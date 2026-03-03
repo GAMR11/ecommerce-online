@@ -7,6 +7,7 @@ use App\Models\Metric;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Http;
 
 class MetricasController extends Controller
 {
