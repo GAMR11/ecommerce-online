@@ -75,29 +75,27 @@ pipeline {
         stage('Build & Deploy (Docker)') {
             steps {
                 script {
-                    echo '🏗️ Levantando entorno Docker...'
+                    echo '🏗️ Levantando contenedores...'
                     bat 'docker compose up -d --build'
+                    
+                    echo '🔧 Ajustando permisos (modo preventivo)...'
+                    // Añadimos || exit 0 para que si chmod falla en algún archivo, el pipeline siga
+                    bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache || exit 0'
 
-                    echo '🔧 Ajustando permisos...'
-                    bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache'
-
-                    // 1. Crear el archivo de migración dinámicamente si no existe
-                    echo '📝 Generando archivo de migración para jira_issues...'
-                    // Usamos un pequeño script de PHP para verificar si ya existe una migración con ese nombre
+                    echo '📝 Verificando/Generando migración...'
                     bat """
-                            docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
-                        """
+                        docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
+                    """
 
-                    // 2. Insertar el contenido de la tabla en el archivo recién creado
-                    // Nota: Esto sobreescribirá el contenido para asegurar que tenga tus campos
-                    echo '🛠️ Definiendo estructura de la tabla jira_issues...'
+                    echo '🛠️ Inyectando estructura de tabla...'
                     def migrationCode = """<?php
-                        use Illuminate\\Database\\Migrations\\Migration;
-                        use Illuminate\\Database\\Schema\\Blueprint;
-                        use Illuminate\\Support\\Facades\\Schema;
+                    use Illuminate\\Database\\Migrations\\Migration;
+                    use Illuminate\\Database\\Schema\\Blueprint;
+                    use Illuminate\\Support\\Facades\\Schema;
 
-                        return new class extends Migration {
-                            public function up(): void {
+                    return new class extends Migration {
+                        public function up(): void {
+                            if (!Schema::hasTable('jira_issues')) {
                                 Schema::create('jira_issues', function (Blueprint \$table) {
                                     \$table->id();
                                     \$table->string('jira_key')->unique();
@@ -114,18 +112,16 @@ pipeline {
                                     \$table->timestamp('updated_at')->useCurrent();
                                 });
                             }
-                            public function down(): void { Schema::dropIfExists('jira_issues'); }
-                        };"""
-                    // Escribimos el código en el archivo dentro del contenedor
-                    // Buscamos el nombre del archivo generado (que tiene el timestamp)
-                    bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; file_put_contents(\$file, base64_decode('" + migrationCode.bytes.encodeBase64().toString() + "'));\""
+                        }
+                        public function down(): void { Schema::dropIfExists('jira_issues'); }
+                    };"""
+                        bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; file_put_contents(\$file, base64_decode('" + migrationCode.bytes.encodeBase64().toString() + "'));\""
 
-                    echo '📊 Migraciones y Limpieza...'
-                    bat 'docker compose exec -T app php artisan migrate --force --seed'
-                    bat 'docker compose exec -T app php artisan cache:clear'
+                        echo '🚀 Ejecutando migración...'
+                        bat 'docker compose exec -T app php artisan migrate --force'
+                    }
                 }
             }
-        }
 
         // ============================================
         // STAGE 3: TESTS
