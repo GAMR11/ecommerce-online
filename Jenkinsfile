@@ -73,57 +73,17 @@ pipeline {
         // STAGE 2: BUILD & DEPLOY
         // ============================================
         stage('Build & Deploy (Docker)') {
-    steps {
-        script {
-            echo '🏗️ Levantando contenedores...'
-            bat 'docker compose up -d --build'
-            
-            echo '🔧 Ajustando permisos...'
-            bat 'docker compose exec -T app chmod -R 777 storage bootstrap/cache || exit 0'
+            steps {
+                script {
+                    echo '🏗️ Levantando entorno Docker...'
+                    bat 'docker compose up -d --build'
 
-            echo '📝 Verificando/Generando migración...'
-            bat """
-                docker compose exec -T app php -r "if (empty(glob('database/migrations/*_create_jira_issues_table.php'))) { exec('php artisan make:migration create_jira_issues_table'); }"
-            """
-
-            echo '🛠️ Inyectando estructura de tabla...'
-            // Definimos el código sin caracteres extraños para que el CMD no explote
-            def migrationCode = """<?php
-use Illuminate\\Database\\Migrations\\Migration;
-use Illuminate\\Database\\Schema\\Blueprint;
-use Illuminate\\Support\\Facades\\Schema;
-
-return new class extends Migration {
-    public function up(): void {
-        if (!Schema::hasTable('jira_issues')) {
-            Schema::create('jira_issues', function (Blueprint \$table) {
-                \$table->id();
-                \$table->string('jira_key')->unique();
-                \$table->string('issue_type')->nullable();
-                \$table->string('summary')->nullable();
-                \$table->text('description')->nullable();
-                \$table->string('status')->nullable();
-                \$table->string('assignee')->nullable();
-                \$table->string('reporter')->nullable();
-                \$table->string('sprint_id')->nullable();
-                \$table->float('story_points')->nullable();
-                \$table->timestamp('created_at')->nullable();
-                \$table->timestamp('completed_at')->nullable();
-                \$table->timestamp('updated_at')->useCurrent();
-            });
+                    echo '📊 Migraciones y Limpieza...'
+                    bat 'docker compose exec -T app php artisan migrate --force --seed'
+                    bat 'docker compose exec -T app php artisan cache:clear'
+                }
+            }
         }
-    }
-};"""
-            // Guardamos el código en un archivo temporal en Windows y luego lo pasamos al contenedor
-            writeFile file: 'migration_temp.php', text: migrationCode
-            bat "docker cp migration_temp.php ecommerce-app:/var/www/migration_temp.php"
-            bat "docker compose exec -T app php -r \"\$file = glob('database/migrations/*_create_jira_issues_table.php')[0]; rename('migration_temp.php', \$file);\""
-
-            echo '🚀 Ejecutando migración...'
-            bat 'docker compose exec -T app php artisan migrate --force'
-        }
-    }
-}
 
         // ============================================
         // STAGE 3: TESTS
@@ -238,36 +198,55 @@ return new class extends Migration {
             }
         }
 
+        // ============================================
+        // STAGE 4: JIRA ISSUE DISCOVERY (AJUSTADO)
+        // ============================================
         stage('Jira Issue Discovery') {
             steps {
                 script {
                     echo '🔗 Analizando tickets de Jira...'
+                    
                     def jiraPattern = /([A-Z]+-\d+)/
                     def issues = []
-
+                    
+                    // Buscar en mensaje de commit y nombre de rama
                     def msgMatches = (env.GIT_MESSAGE =~ jiraPattern)
                     while (msgMatches.find()) { issues << msgMatches.group(1) }
+                    
+                    def branchMatches = (env.GIT_BRANCH =~ jiraPattern)
+                    while (branchMatches.find()) { issues << branchMatches.group(1) }
+                    
+                    issues = issues.unique()
 
                     if (issues.isEmpty()) {
-                        echo 'ℹ️ No se detectaron issues.'
+                        echo 'ℹ️ No se detectaron llaves de Jira.'
                     } else {
-                        issues.unique().each { issueKey ->
-                            echo "🚀 Procesando: ${issueKey}"
-
-                            // Usamos un bloque try/catch de Groovy para que el pipeline NO falle si el CURL da error
-                            try {
-                                def fetchData = JsonOutput.toJson([tool: env.TOOL_NAME, issue_key: issueKey, timestamp: env.PIPELINE_START_ISO])
-                                // El "|| exit 0" al final del comando bat evita que Jenkins marque error si el curl falla
-                                bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch -H \"Content-Type: application/json\" -d \"${fetchData.replace('"', '\\"')}\" || exit 0"
-                            } catch (Exception e) {
-                                echo '⚠️ No se pudo conectar con el endpoint de Jira.'
-                            }
+                        issues.each { issueKey ->
+                            echo "🚀 Registrando métrica para ticket: ${issueKey}"
+                            
+                            // Creamos un objeto que el controlador guardará en la columna 'data'
+                            def jiraMetric = [
+                                type: 'jira-issue',
+                                tool: env.TOOL_NAME,
+                                timestamp: env.PIPELINE_START_ISO,
+                                data: [
+                                    issue_key: issueKey,
+                                    summary: env.GIT_MESSAGE,
+                                    assignee: env.GIT_AUTHOR,
+                                    branch: env.GIT_BRANCH,
+                                    commit_sha: env.GIT_COMMIT_SHA,
+                                    status: 'In Progress'
+                                ]
+                            ]
+                            
+                            def payload = JsonOutput.toJson(jiraMetric)
+                            // Enviamos al endpoint genérico de métricas
+                            bat "curl -s -X POST ${env.APP_URL}/api/metrics -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
                         }
                     }
                 }
             }
         }
-
         // ========================================
         // STAGE 5: CAPTURAR DATOS DE GITHUB (OPCIONAL)
         // ========================================
