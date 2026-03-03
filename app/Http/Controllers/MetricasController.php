@@ -177,6 +177,35 @@ class MetricasController extends Controller
         }
     }
 
+    public function getJiraCommitStats()
+    {
+        try {
+            // Obtenemos todas las métricas que sean registros de commits o issues vinculados
+            $stats = Metric::where('type', 'jira-issue')
+                ->get()
+                ->map(function ($metric) {
+                    return is_array($metric->data) ? $metric->data : json_decode($metric->data, true);
+                })
+                ->groupBy('issue_key')
+                ->map(function ($group, $key) {
+                    return [
+                        'issue_key' => $key,
+                        'total_commits_detected' => $group->count(),
+                        'last_activity' => $group->max('created_at'),
+                        'developers' => $group->pluck('assignee')->unique()->values()
+                    ];
+                })
+                ->values();
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $stats
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
     /**
      * INTEGRACIÓN JIRA API (Opcional)
      * Si tienes acceso a la API de Jira, obtén datos directamente desde allí

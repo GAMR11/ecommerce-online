@@ -52,6 +52,8 @@ Route::prefix('metrics')
 
         // Comparar GitHub Actions vs Jenkins
         Route::get('/comparison', [MetricasController::class, 'getComparison']);
+
+        Route::get('/jira-stats', [MetricasController::class, 'getJiraCommitStats']);
     });
 
 // Ruta de prueba (sin autenticación)
