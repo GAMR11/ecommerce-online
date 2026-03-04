@@ -11,9 +11,11 @@ import groovy.json.JsonOutput
 @NonCPS
 def extractJiraKeys(String text) {
     def found = []
-    def matcher = text =~ /([A-Z]+-\d+)/
-    for (int i = 0; i < matcher.count; i++) {
-        found << matcher[i][1]
+    // Usamos java.util.regex.Pattern directamente — 100% permitido en el sandbox
+    def pattern = java.util.regex.Pattern.compile('([A-Z]+-\\d+)')
+    def matcher = pattern.matcher(text)
+    while (matcher.find()) {
+        found << matcher.group(1)
     }
     return found
 }
