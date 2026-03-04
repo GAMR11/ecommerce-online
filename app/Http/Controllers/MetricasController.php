@@ -33,6 +33,8 @@ class MetricasController extends Controller
         //     'sprint_id' => 'nullable|integer',
         //     'story_points' => 'nullable|integer',
         // ]);
+        $payload = $request->all();
+
 
         try {
             // Guardar en tabla metrics (general)
@@ -43,31 +45,12 @@ class MetricasController extends Controller
                 'timestamp' => now(),
             ]);
 
-            // Opcional: Guardar en tabla jira_issues (si existe)
-            if (DB::table('jira_issues')->exists()) {
-                DB::table('jira_issues')->updateOrInsert(
-                    ['jira_key' => $request->issue_key],
-                    [
-                        'issue_type' => $request->issue_type,
-                        'summary' => $request->summary,
-                        'description' => $request->description ?? null,
-                        'status' => $request->status,
-                        'assignee' => $request->assignee,
-                        'reporter' => $request->reporter,
-                        'created_at' => $request->created_at,
-                        'completed_at' => $request->completed_at,
-                        'sprint_id' => $request->sprint_id,
-                        'story_points' => $request->story_points,
-                        'updated_at' => now(),
-                    ]
-                );
-            }
-
+            $innerData = isset($payload['data']) ? $payload['data'] : $payload;
             return response()->json([
                 'status' => 'recorded',
                 'id' => Metric::max('id'),
                 'type' => 'jira-issue',
-                'issue_key' => $request->issue_key,
+                'issue_key' => $innerData['issue_key'] ?? null,,
             ], 201);
         } catch (\Exception $e) {
             return response()->json([

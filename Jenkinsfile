@@ -8,6 +8,9 @@ pipeline {
         METRICS_API_KEY = 'tu_clave_aqui'
         TOOL_NAME       = 'jenkins'
         GITHUB_TOKEN = credentials('token-api-jenkins')
+        JIRA_URL = 'https://gestortareas.atlassian.net/'
+        JIRA_USERNAME = 'gamr130898@gmail.com'
+        JIRA_API_TOKEN = 'ATATT3xFfGF0JNJI1G_TJ6qb5Twqg1N5sEtbs-3g4iCRZJcO11uvnqd0iJP8FEAl_41ASMFj8Nrkh-0EAWcyx7oYr52ogpFGuiDexShV-H6j3n_ElokQqhAfXoVv4Nb0D4nsSbR6Mdk59ZhnW-LmciqUpL2pIFsMCwCtW0gvKrsn1SSF2NUFelk=ED50B26E'
     }
 
     stages {
@@ -198,36 +201,36 @@ pipeline {
             }
         }
 
-      stage('Jira Issue Discovery') {
-    steps {
-        script {
-            echo '🔗 Analizando tickets de Jira...'
-            
-            // Definimos la función de búsqueda dentro del script pero 
-            // nos aseguramos de que los objetos Matcher no salgan de aquí
-            def findIssues = { String text ->
-                def jiraPattern = /([A-Z]+-\d+)/
-                def found = []
-                def matcher = (text =~ jiraPattern)
-                while (matcher.find()) {
-                    found << matcher.group(1)
-                }
-                return found
-            }
+        stage('Jira Issue Discovery') {
+            steps {
+                script {
+                    echo '🔗 Analizando tickets de Jira...'
 
-            // Capturamos las llaves en listas simples (que sí son serializables)
-            def issues = []
-            issues.addAll(findIssues(env.GIT_MESSAGE ?: ""))
-            issues.addAll(findIssues(env.GIT_BRANCH ?: ""))
-            issues = issues.unique()
+                    // Definimos la función de búsqueda dentro del script pero
+                    // nos aseguramos de que los objetos Matcher no salgan de aquí
+                    def findIssues = { String text ->
+                        def jiraPattern = /([A-Z]+-\d+)/
+                        def found = []
+                        def matcher = (text =~ jiraPattern)
+                        while (matcher.find()) {
+                            found << matcher.group(1)
+                        }
+                        return found
+                    }
 
-            if (issues.isEmpty()) {
-                echo 'ℹ️ No se detectaron llaves de Jira.'
+                    // Capturamos las llaves en listas simples (que sí son serializables)
+                    def issues = []
+                    issues.addAll(findIssues(env.GIT_MESSAGE ?: ''))
+                    issues.addAll(findIssues(env.GIT_BRANCH ?: ''))
+                    issues = issues.unique()
+
+                    if (issues.isEmpty()) {
+                        echo 'ℹ️ No se detectaron llaves de Jira.'
             } else {
-                issues.each { issueKey ->
-                    echo "🚀 Registrando métrica para ticket: ${issueKey}"
-                    
-                    def jiraMetric = [
+                        issues.each { issueKey ->
+                            echo "🚀 Registrando métrica para ticket: ${issueKey}"
+
+                            def jiraMetric = [
                         type: 'jira-issue',
                         tool: env.TOOL_NAME,
                         timestamp: env.PIPELINE_START_ISO,
@@ -240,15 +243,72 @@ pipeline {
                             status: 'In Progress'
                         ]
                     ]
-                    
-                    def payload = groovy.json.JsonOutput.toJson(jiraMetric)
-                    // Importante: El replace de comillas es vital para el bat de Windows
-                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
+
+                            def payload = groovy.json.JsonOutput.toJson(jiraMetric)
+                            // Importante: El replace de comillas es vital para el bat de Windows
+                            bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
+                        }
+                    }
                 }
             }
         }
-    }
-}
+
+        stage('Fetch Jira Issue Data') {
+            when {
+                expression { return env.JIRA_API_TOKEN != null }
+            }
+            steps {
+                script {
+                    // Lista de issues detectados en el stage anterior
+                    def issues = []
+                    def jiraPattern = /([A-Z]+-\d+)/
+                    def matcher = (env.GIT_MESSAGE =~ jiraPattern)
+                    while (matcher.find()) { issues << matcher.group(1) }
+                    matcher = (env.GIT_BRANCH =~ jiraPattern)
+                    while (matcher.find()) { issues << matcher.group(1) }
+                    issues = issues.unique()
+
+                    issues.each { issueKey ->
+                        echo "📋 Consultando Jira API para: ${issueKey}"
+
+                        // Consultar Jira API directamente desde Jenkins
+                        def jiraResponse = bat(
+                    script: "@echo off & curl -s -u ${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN} " +
+                            "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}\"",
+                    returnStdout: true
+                ).trim()
+
+                        // Enviar respuesta cruda a tu endpoint de Laravel
+                        bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch-raw " +
+                    '-H \"Content-Type: application/json\" ' +
+                    "-d \"${jiraResponse.replace('"', '\\"')}\""
+                    }
+                }
+            }
+        }
+
+        stage('Capture GitHub PR Data') {
+            steps {
+                script {
+                    echo '🔍 Buscando Pull Requests asociados al commit...'
+
+                    // Buscar PRs que contienen este commit
+                    def prResponse = bat(
+                script: "@echo off & curl -s -H \"Authorization: Bearer ${env.GITHUB_TOKEN}\" " +
+                        '-H \"Accept: application/vnd.github+json\" ' +
+                        "\"https://api.github.com/repos/GAMR11/ecommerce-online/commits/${env.GIT_COMMIT_SHA}/pulls\"",
+                returnStdout: true
+            ).trim()
+
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/github-pr-raw " +
+                '-H \"Content-Type: application/json\" ' +
+                "-d \"${prResponse.replace('"', '\\"')}\""
+
+                    echo '📤 Datos de PR enviados'
+                }
+            }
+        }
+
         // ========================================
         // STAGE 5: CAPTURAR DATOS DE GITHUB (OPCIONAL)
         // ========================================
