@@ -22,6 +22,7 @@ def extractJiraKeys(String text) {
 
 @NonCPS
 def buildJiraSuccessComment(String buildNumber, String branch, String commitMsg) {
+    // SIN emojis — cmd.exe de Windows los interpreta como comandos y falla con exit 255
     return groovy.json.JsonOutput.toJson([
         body: [
             type: 'doc',
@@ -30,7 +31,7 @@ def buildJiraSuccessComment(String buildNumber, String branch, String commitMsg)
                 type: 'paragraph',
                 content: [[
                     type: 'text',
-                    text: "✅ Deploy exitoso | Build #${buildNumber} | Branch: ${branch} | Commit: ${commitMsg}"
+                    text: "[OK] Deploy exitoso | Build #${buildNumber} | Branch: ${branch} | Commit: ${commitMsg}"
                 ]]
             ]]
         ]
@@ -39,6 +40,7 @@ def buildJiraSuccessComment(String buildNumber, String branch, String commitMsg)
 
 @NonCPS
 def buildJiraFailureComment(String buildNumber, String branch) {
+    // SIN emojis — cmd.exe de Windows los interpreta como comandos y falla con exit 255
     return groovy.json.JsonOutput.toJson([
         body: [
             type: 'doc',
@@ -47,7 +49,7 @@ def buildJiraFailureComment(String buildNumber, String branch) {
                 type: 'paragraph',
                 content: [[
                     type: 'text',
-                    text: "❌ Build FALLÓ | Build #${buildNumber} | Branch: ${branch} | Requiere atención inmediata."
+                    text: "[FALLO] Build #${buildNumber} | Branch: ${branch} | Requiere atencion inmediata."
                 ]]
             ]]
         ]
@@ -329,7 +331,6 @@ pipeline {
         // ============================================================
         // STAGE 6: GITHUB PR DATA
         // Captura Pull Requests asociados al commit actual
-        // Útil para medir tiempo de code review dentro del Lead Time
         // ============================================================
         stage('Capture GitHub PR Data') {
             when {
@@ -339,18 +340,24 @@ pipeline {
                 script {
                     echo '🔍 Buscando Pull Requests asociados al commit...'
 
-                    def prResponse = bat(
-                        script: '@echo off & curl -s ' +
-                                "-H \"Authorization: Bearer ${env.GITHUB_TOKEN}\" " +
-                                '-H \"Accept: application/vnd.github+json\" ' +
-                                '-H \"X-GitHub-Api-Version: 2022-11-28\" ' +
-                                "\"https://api.github.com/repos/GAMR11/ecommerce-online/commits/${env.GIT_COMMIT_SHA}/pulls\"",
-                        returnStdout: true
-                    ).trim()
+                    // 1. Guardar respuesta de GitHub en archivo temporal
+                    //    La API devuelve un array JSON que empieza con '['.
+                    //    En Windows cmd.exe, pasar '[...]' directo en -d "..." falla.
+                    //    Solución: escribir a archivo y usar -d @archivo.
+                    bat '@echo off & curl -s ' +
+                        "-H \"Authorization: Bearer ${env.GITHUB_TOKEN}\" " +
+                        '-H \"Accept: application/vnd.github+json\" ' +
+                        '-H \"X-GitHub-Api-Version: 2022-11-28\" ' +
+                        "\"https://api.github.com/repos/GAMR11/ecommerce-online/commits/${env.GIT_COMMIT_SHA}/pulls\" " +
+                        '> pr_response.json'
 
+                    // 2. Enviar el archivo directamente a Laravel
                     bat "curl -s -X POST ${env.APP_URL}/api/metrics/github-pr-raw " +
                         '-H \"Content-Type: application/json\" ' +
-                        "-d \"${prResponse.replace('"', '\\"')}\""
+                        '-d @pr_response.json'
+
+                    // 3. Limpiar archivo temporal
+                    bat 'del pr_response.json 2>nul'
 
                     echo '📤 PR data enviada'
                 }
@@ -395,19 +402,20 @@ pipeline {
             script {
                 echo '✅ Pipeline exitoso — Comentando en Jira...'
 
-                // Agregar comentario automático en cada ticket detectado
                 if (env.JIRA_KEYS && env.JIRA_KEYS.trim() != '') {
                     env.JIRA_KEYS.split(',').each { rawKey ->
                         def issueKey = rawKey.trim()
-                        // buildJiraSuccessComment es @NonCPS — seguro, sin Matcher
                         def comment  = buildJiraSuccessComment(
                             env.BUILD_NUMBER, env.GIT_BRANCH, env.GIT_MESSAGE
                         )
+                        // Escribir JSON a archivo para evitar problemas de escaping en cmd.exe
+                        writeFile file: 'jira_comment.json', text: comment
                         bat 'curl -s -X POST ' +
                             "-u \"${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN}\" " +
                             '-H \"Content-Type: application/json\" ' +
                             "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}/comment\" " +
-                            "-d \"${comment.replace('"', '\\"')}\""
+                            '-d @jira_comment.json'
+                        bat 'del jira_comment.json 2>nul'
                         echo "💬 Comentario agregado en Jira: ${issueKey}"
                     }
                 }
@@ -452,11 +460,14 @@ pipeline {
                     env.JIRA_KEYS.split(',').each { rawKey ->
                         def issueKey = rawKey.trim()
                         def comment  = buildJiraFailureComment(env.BUILD_NUMBER, env.GIT_BRANCH ?: 'unknown')
+                        // Escribir JSON a archivo para evitar problemas de escaping en cmd.exe
+                        writeFile file: 'jira_comment.json', text: comment
                         bat 'curl -s -X POST ' +
                             "-u \"${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN}\" " +
                             '-H \"Content-Type: application/json\" ' +
                             "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}/comment\" " +
-                            "-d \"${comment.replace('"', '\\"')}\""
+                            '-d @jira_comment.json'
+                        bat 'del jira_comment.json 2>nul'
                         echo "💬 Notificación de fallo enviada a Jira: ${issueKey}"
                     }
                 }
