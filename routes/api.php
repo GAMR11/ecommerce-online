@@ -9,7 +9,6 @@ use App\Http\Controllers\MetricasController;
 // ============================================
 
 Route::prefix('metrics')
-    ->middleware('metrics.api')
     ->group(function () {
 
         Route::post('/github-commit', [MetricasController::class, 'captureGithubCommit']);

@@ -1,42 +1,104 @@
 import groovy.json.JsonOutput
 
+// ================================================================
+// FUNCIONES @NonCPS
+// Jenkins serializa el estado del pipeline entre pasos.
+// Los objetos java.util.regex.Matcher NO son serializables,
+// por lo que DEBEN vivir dentro de funciones @NonCPS.
+// Estas funciones se ejecutan de forma no continuable (no pausan).
+// ================================================================
+
+@NonCPS
+def extractJiraKeys(String text) {
+    def found = []
+    def matcher = text =~ /([A-Z]+-\d+)/
+    for (int i = 0; i < matcher.count; i++) {
+        found << matcher[i][1]
+    }
+    return found
+}
+
+@NonCPS
+def buildJiraSuccessComment(String buildNumber, String branch, String commitMsg) {
+    return groovy.json.JsonOutput.toJson([
+        body: [
+            type: 'doc',
+            version: 1,
+            content: [[
+                type: 'paragraph',
+                content: [[
+                    type: 'text',
+                    text: "✅ Deploy exitoso | Build #${buildNumber} | Branch: ${branch} | Commit: ${commitMsg}"
+                ]]
+            ]]
+        ]
+    ])
+}
+
+@NonCPS
+def buildJiraFailureComment(String buildNumber, String branch) {
+    return groovy.json.JsonOutput.toJson([
+        body: [
+            type: 'doc',
+            version: 1,
+            content: [[
+                type: 'paragraph',
+                content: [[
+                    type: 'text',
+                    text: "❌ Build FALLÓ | Build #${buildNumber} | Branch: ${branch} | Requiere atención inmediata."
+                ]]
+            ]]
+        ]
+    ])
+}
+
+// ================================================================
+// PIPELINE PRINCIPAL
+// ================================================================
 pipeline {
     agent any
 
     environment {
-        APP_URL         = 'http://localhost:8000'
-        METRICS_API_KEY = 'tu_clave_aqui'
-        TOOL_NAME       = 'jenkins'
-        GITHUB_TOKEN = credentials('token-api-jenkins')
-        JIRA_URL = 'https://gestortareas.atlassian.net/'
-        JIRA_USERNAME = 'gamr130898@gmail.com'
-        JIRA_API_TOKEN = 'ATATT3xFfGF0JNJI1G_TJ6qb5Twqg1N5sEtbs-3g4iCRZJcO11uvnqd0iJP8FEAl_41ASMFj8Nrkh-0EAWcyx7oYr52ogpFGuiDexShV-H6j3n_ElokQqhAfXoVv4Nb0D4nsSbR6Mdk59ZhnW-LmciqUpL2pIFsMCwCtW0gvKrsn1SSF2NUFelk=ED50B26E'
+        APP_URL          = 'http://localhost:8000'
+        METRICS_API_KEY  = 'tu_clave_aqui'
+        TOOL_NAME        = 'jenkins'
+        GITHUB_TOKEN     = credentials('token-api-jenkins')
+
+        // ⚠️  IMPORTANTE: Mueve estas credenciales a Jenkins Credentials Manager
+        // Panel Jenkins → Manage Jenkins → Credentials → Add Credential (Secret text)
+        // ID sugerido: 'jira-api-token'
+        // Una vez hecho, reemplaza las líneas de abajo por:
+        //   JIRA_API_TOKEN = credentials('jira-api-token')
+        //
+        // NUNCA pongas tokens en texto plano en el Jenkinsfile — están expuestos en Git.
+        JIRA_URL         = 'https://gestortareas.atlassian.net'   // sin slash al final
+        JIRA_USERNAME    = 'gamr130898@gmail.com'
+        JIRA_API_TOKEN   = credentials('API TOKEN JIRA')          // crea este credential
     }
 
     stages {
-        // ============================================
+        // ============================================================
         // STAGE 1: CHECKOUT & CAPTURAR INFO GIT
-        // ============================================
+        // ============================================================
         stage('Checkout & Git Info') {
             steps {
                 script {
                     echo '🔍 Capturando información de Git...'
                     checkout scm
 
-                    // ========== DATOS DE GIT ==========
-                    // Commit SHA
+                    // SHA del commit actual
                     env.GIT_COMMIT_SHA = bat(
                         script: '@echo off & git rev-parse HEAD',
                         returnStdout: true
                     ).trim()
 
-                    // Timestamp del commit (cuando se hizo el commit)
+                    // Timestamp epoch del commit
                     def commitTimestampEpoch = bat(
                         script: "@echo off & git show -s --format=%%ct ${env.GIT_COMMIT_SHA}",
                         returnStdout: true
                     ).trim()
                     env.COMMIT_TIME_EPOCH = commitTimestampEpoch
-                    env.COMMIT_TIME_ISO = new Date(
+                    env.COMMIT_TIME_ISO   = new Date(
                         commitTimestampEpoch.toLong() * 1000
                     ).format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
 
@@ -58,28 +120,41 @@ pipeline {
                         returnStdout: true
                     ).trim()
 
-                    // Timestamp de ahora (cuando inicia el pipeline)
-                    env.PIPELINE_START_EPOCH = ((long) (System.currentTimeMillis() / 1000)).toString()
-                    env.PIPELINE_START_ISO = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
+                    // Timestamp de inicio del pipeline
+                    env.PIPELINE_START_EPOCH = ((long)(System.currentTimeMillis() / 1000)).toString()
+                    env.PIPELINE_START_ISO   = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
 
-                    // ========== MOSTRAR INFO ==========
-                    echo "📝 Commit SHA: ${env.GIT_COMMIT_SHA}"
-                    echo "⏱️ Commit Time: ${env.COMMIT_TIME_ISO}"
-                    echo "👤 Author: ${env.GIT_AUTHOR}"
-                    echo "💬 Message: ${env.GIT_MESSAGE}"
-                    echo "🌿 Branch: ${env.GIT_BRANCH}"
+                    // ─── Extraer Jira keys con @NonCPS ────────────────────────
+                    // Se combinan mensaje + branch, se extraen keys únicas y
+                    // se guardan como String simple (ej: "KAN-1,KAN-2") en env
+                    // para que sea serializable entre stages sin problema.
+                    def rawText  = (env.GIT_MESSAGE ?: '') + ' ' + (env.GIT_BRANCH ?: '')
+                    def keys     = extractJiraKeys(rawText)
+                    env.JIRA_KEYS = keys.unique().join(',')  // String serializable
+
+                    echo "📝 Commit SHA   : ${env.GIT_COMMIT_SHA}"
+                    echo "⏱️  Commit Time  : ${env.COMMIT_TIME_ISO}"
+                    echo "👤 Author       : ${env.GIT_AUTHOR}"
+                    echo "💬 Message      : ${env.GIT_MESSAGE}"
+                    echo "🌿 Branch       : ${env.GIT_BRANCH}"
+                    echo "🎫 Jira Keys    : ${env.JIRA_KEYS ?: 'ninguno detectado'}"
                 }
             }
         }
 
-        // ============================================
-        // STAGE 2: BUILD & DEPLOY
-        // ============================================
+        // ============================================================
+        // STAGE 2: BUILD & DEPLOY (Docker)
+        // Capturamos tiempo de build para aportarlo al Lead Time
+        // ============================================================
         stage('Build & Deploy (Docker)') {
             steps {
                 script {
                     echo '🏗️ Levantando entorno Docker...'
+
+                    env.DOCKER_BUILD_START = ((long)(System.currentTimeMillis() / 1000)).toString()
                     bat 'docker compose up -d --build'
+                    env.DOCKER_BUILD_DURATION = ((long)(System.currentTimeMillis() / 1000) - env.DOCKER_BUILD_START.toLong()).toString()
+                    echo "🐳 Docker build: ${env.DOCKER_BUILD_DURATION}s"
 
                     echo '📊 Migraciones y Limpieza...'
                     bat 'docker compose exec -T app php artisan migrate --force --seed'
@@ -88,255 +163,221 @@ pipeline {
             }
         }
 
-        // ============================================
+        // ============================================================
         // STAGE 3: TESTS
-        // ============================================
+        // Capturamos duración para métricas de calidad
+        // ============================================================
         stage('Run Tests') {
             steps {
                 script {
                     echo '🧪 Ejecutando tests...'
+
+                    env.TEST_START = ((long)(System.currentTimeMillis() / 1000)).toString()
                     bat 'docker compose exec -T app php artisan test'
+                    env.TEST_DURATION = ((long)(System.currentTimeMillis() / 1000) - env.TEST_START.toLong()).toString()
+                    echo "✅ Tests completados en: ${env.TEST_DURATION}s"
                 }
             }
         }
 
-        // ============================================
-        // STAGE 4: CAPTURAR MÉTRICAS DORA COMPLETAS
-        // ============================================
+        // ============================================================
+        // STAGE 4: MÉTRICAS DORA — 4 métricas base
+        // ============================================================
         stage('Track DORA Metrics') {
             steps {
                 script {
-                    echo '📊 Registrando Métricas DORA Completas...'
+                    echo '📊 Registrando Métricas DORA...'
 
-                    def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
+                    def nowIso   = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
                     def nowEpoch = (System.currentTimeMillis() / 1000).toLong()
 
-                    // ========================================
-                    // 1️⃣ DEPLOYMENT FREQUENCY
-                    // ========================================
-                    // Evento: Se ejecutó un deployment exitoso
+                    // ── 1. DEPLOYMENT FREQUENCY ──────────────────────────────
                     def deploymentData = JsonOutput.toJson([
-                        // Datos de Jenkins
-                        tool: env.TOOL_NAME,
-                        build_number: env.BUILD_NUMBER,
-                        build_duration_seconds: env.BUILD_DURATION ?: 0,
-
-                        // Datos de Git
-                        commit_sha: env.GIT_COMMIT_SHA,
-                        commit_author: env.GIT_AUTHOR,
-                        commit_message: env.GIT_MESSAGE,
-                        commit_timestamp: env.COMMIT_TIME_ISO,
-                        branch: env.GIT_BRANCH,
-
-                        // Estados
-                        status: 'success',
-                        is_failure: false,
-                        environment: 'prod',
-
-                        // Timestamps
-                        deployed_at: nowIso,
-                        timestamp: nowIso
+                        tool                  : env.TOOL_NAME,
+                        build_number          : env.BUILD_NUMBER,
+                        build_duration_seconds: env.DOCKER_BUILD_DURATION?.toInteger() ?: 0,
+                        test_duration_seconds : env.TEST_DURATION?.toInteger() ?: 0,
+                        commit_sha            : env.GIT_COMMIT_SHA,
+                        commit_author         : env.GIT_AUTHOR,
+                        commit_message        : env.GIT_MESSAGE,
+                        commit_timestamp      : env.COMMIT_TIME_ISO,
+                        branch                : env.GIT_BRANCH,
+                        jira_keys             : env.JIRA_KEYS,
+                        status                : 'success',
+                        is_failure            : false,
+                        environment           : 'prod',
+                        deployed_at           : nowIso,
+                        timestamp             : nowIso
                     ])
-
                     echo '📤 Enviando deployment metric...'
-                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment " +
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/deployment " +
                         '-H \"Content-Type: application/json\" ' +
                         "-d \"${deploymentData.replace('"', '\\"')}\""
 
-                    // ========================================
-                    // 2️⃣ LEAD TIME FOR CHANGES
-                    // ========================================
-                    // Lead Time = Tiempo entre commit y deployment
+                    // ── 2. LEAD TIME FOR CHANGES ─────────────────────────────
+                    // Lead Time técnico: desde commit hasta deploy
                     long leadTimeSeconds = nowEpoch - env.COMMIT_TIME_EPOCH.toLong()
-
                     def leadTimeData = JsonOutput.toJson([
-                        tool: env.TOOL_NAME,
-                        commit_sha: env.GIT_COMMIT_SHA,
-                        commit_timestamp: env.COMMIT_TIME_ISO,
-                        deployment_timestamp: nowIso,
-                        lead_time_seconds: leadTimeSeconds,
-                        lead_time_minutes: (leadTimeSeconds / 60).toInteger(),
-                        timestamp: nowIso
+                        tool                 : env.TOOL_NAME,
+                        commit_sha           : env.GIT_COMMIT_SHA,
+                        commit_timestamp     : env.COMMIT_TIME_ISO,
+                        deployment_timestamp : nowIso,
+                        lead_time_seconds    : leadTimeSeconds,
+                        lead_time_minutes    : (leadTimeSeconds / 60).toInteger(),
+                        jira_keys            : env.JIRA_KEYS,
+                        timestamp            : nowIso
                     ])
-
                     echo '📤 Enviando lead time metric...'
-                    bat "curl -X POST ${env.APP_URL}/api/metrics/leadtime " +
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/leadtime " +
                         '-H \"Content-Type: application/json\" ' +
                         "-d \"${leadTimeData.replace('"', '\\"')}\""
 
-                    // ========================================
-                    // 3️⃣ CHANGE FAILURE RATE
-                    // ========================================
-                    // Enviamos resultado: SUCCESS o FAILURE
+                    // ── 3. CHANGE FAILURE RATE ───────────────────────────────
                     def resultData = JsonOutput.toJson([
-                        tool: env.TOOL_NAME,
-                        build_number: env.BUILD_NUMBER,
-                        commit_sha: env.GIT_COMMIT_SHA,
-                        status: 'success',
-                        is_failure: false,
-                        timestamp: nowIso
+                        tool         : env.TOOL_NAME,
+                        build_number : env.BUILD_NUMBER,
+                        commit_sha   : env.GIT_COMMIT_SHA,
+                        status       : 'success',
+                        is_failure   : false,
+                        timestamp    : nowIso
                     ])
-
                     echo '📤 Enviando deployment result metric...'
-                    bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result " +
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/deployment-result " +
                         '-H \"Content-Type: application/json\" ' +
                         "-d \"${resultData.replace('"', '\\"')}\""
 
-                    // ========================================
-                    // 4️⃣ MTTR (Auto-Resolve)
-                    // ========================================
-                    // Si el build fue exitoso, resolvemos incident previos
+                    // ── 4. MTTR — resolver incidentes abiertos ───────────────
                     def resolveData = JsonOutput.toJson([
-                        tool: env.TOOL_NAME,
-                        resolved_by: 'jenkins-automation',
-                        resolution_time: nowIso,
-                        timestamp: nowIso
+                        tool            : env.TOOL_NAME,
+                        resolved_by     : 'jenkins-automation',
+                        resolution_time : nowIso,
+                        timestamp       : nowIso
                     ])
-
                     echo '📤 Resolviendo incidentes previos...'
-                    bat "curl -X POST ${env.APP_URL}/api/metrics/incident/resolve " +
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/incident/resolve " +
                         '-H \"Content-Type: application/json\" ' +
                         "-d \"${resolveData.replace('"', '\\"')}\""
                 }
             }
         }
 
-        stage('Jira Issue Discovery') {
-            steps {
-                script {
-                    echo '🔗 Analizando tickets de Jira...'
-
-                    // Definimos la función de búsqueda dentro del script pero
-                    // nos aseguramos de que los objetos Matcher no salgan de aquí
-                    def findIssues = { String text ->
-                        def jiraPattern = /([A-Z]+-\d+)/
-                        def found = []
-                        def matcher = (text =~ jiraPattern)
-                        while (matcher.find()) {
-                            found << matcher.group(1)
-                        }
-                        return found
-                    }
-
-                    // Capturamos las llaves en listas simples (que sí son serializables)
-                    def issues = []
-                    issues.addAll(findIssues(env.GIT_MESSAGE ?: ''))
-                    issues.addAll(findIssues(env.GIT_BRANCH ?: ''))
-                    issues = issues.unique()
-
-                    if (issues.isEmpty()) {
-                        echo 'ℹ️ No se detectaron llaves de Jira.'
-            } else {
-                        issues.each { issueKey ->
-                            echo "🚀 Registrando métrica para ticket: ${issueKey}"
-
-                            def jiraMetric = [
-                        type: 'jira-issue',
-                        tool: env.TOOL_NAME,
-                        timestamp: env.PIPELINE_START_ISO,
-                        data: [
-                            issue_key: issueKey,
-                            summary: env.GIT_MESSAGE,
-                            assignee: env.GIT_AUTHOR,
-                            branch: env.GIT_BRANCH,
-                            commit_sha: env.GIT_COMMIT_SHA,
-                            status: 'In Progress'
-                        ]
-                    ]
-
-                            def payload = groovy.json.JsonOutput.toJson(jiraMetric)
-                            // Importante: El replace de comillas es vital para el bat de Windows
-                            bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue -H \"Content-Type: application/json\" -d \"${payload.replace('"', '\\"')}\""
-                        }
-                    }
-                }
-            }
-        }
-
-        stage('Fetch Jira Issue Data') {
+        // ============================================================
+        // STAGE 5: JIRA INTEGRATION
+        // Registra actividad del issue + consulta API de Jira
+        // para obtener datos reales (created_at, story_points, status)
+        // ============================================================
+        stage('Jira Integration') {
             when {
-                expression { return env.JIRA_API_TOKEN != null }
+                // Solo corre si se detectaron tickets en el commit/branch
+                expression { return env.JIRA_KEYS != null && env.JIRA_KEYS.trim() != '' }
             }
             steps {
                 script {
-                    // Lista de issues detectados en el stage anterior
-                    def issues = []
-                    def jiraPattern = /([A-Z]+-\d+)/
-                    def matcher = (env.GIT_MESSAGE =~ jiraPattern)
-                    while (matcher.find()) { issues << matcher.group(1) }
-                    matcher = (env.GIT_BRANCH =~ jiraPattern)
-                    while (matcher.find()) { issues << matcher.group(1) }
-                    issues = issues.unique()
+                    echo "🔗 Integrando con Jira — tickets: ${env.JIRA_KEYS}"
 
-                    issues.each { issueKey ->
-                        echo "📋 Consultando Jira API para: ${issueKey}"
+                    def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
 
-                        // Consultar Jira API directamente desde Jenkins
-                        def jiraResponse = bat(
-                    script: "@echo off & curl -s -u ${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN} " +
-                            "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}\"",
-                    returnStdout: true
-                ).trim()
+                    // env.JIRA_KEYS = "KAN-1,KAN-2" → split seguro, sin Matcher
+                    env.JIRA_KEYS.split(',').each { rawKey ->
+                        def issueKey = rawKey.trim()
+                        echo "🎫 Procesando ticket: ${issueKey}"
 
-                        // Enviar respuesta cruda a tu endpoint de Laravel
-                        bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/fetch-raw " +
-                    '-H \"Content-Type: application/json\" ' +
-                    "-d \"${jiraResponse.replace('"', '\\"')}\""
+                        // ── 5a. Registrar actividad del issue en tu BD ────────
+                        def jiraMetric = JsonOutput.toJson([
+                            type      : 'jira-issue',
+                            tool      : env.TOOL_NAME,
+                            timestamp : nowIso,
+                            data      : [
+                                issue_key  : issueKey,
+                                summary    : env.GIT_MESSAGE,
+                                assignee   : env.GIT_AUTHOR,
+                                branch     : env.GIT_BRANCH,
+                                commit_sha : env.GIT_COMMIT_SHA,
+                                status     : 'In Progress'
+                            ]
+                        ])
+                        bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue " +
+                            '-H \"Content-Type: application/json\" ' +
+                            "-d \"${jiraMetric.replace('"', '\\"')}\""
+
+                        // ── 5b. Consultar API real de Jira ────────────────────
+                        // Obtenemos: created_at (Lead Time negocio), story_points,
+                        // status real, tipo de issue, prioridad
+                        echo "📋 Consultando Jira API para datos reales de ${issueKey}..."
+                        def jiraApiResponse = bat(
+                            script: '@echo off & curl -s ' +
+                                    "-u \"${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN}\" " +
+                                    '-H \"Accept: application/json\" ' +
+                                    "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}?fields=summary,status,assignee,created,updated,priority,issuetype,customfield_10016\"",
+                            returnStdout: true
+                        ).trim()
+
+                        // Enviar datos crudos de la API de Jira a tu endpoint
+                        // Laravel los parsea y extrae: created_at, story_points, status real
+                        bat "curl -s -X POST ${env.APP_URL}/api/metrics/jira-issue/from-api " +
+                            '-H \"Content-Type: application/json\" ' +
+                            "-d \"${jiraApiResponse.replace('"', '\\"')}\""
+
+                        echo "✅ Jira data sincronizada para: ${issueKey}"
                     }
                 }
             }
         }
 
+        // ============================================================
+        // STAGE 6: GITHUB PR DATA
+        // Captura Pull Requests asociados al commit actual
+        // Útil para medir tiempo de code review dentro del Lead Time
+        // ============================================================
         stage('Capture GitHub PR Data') {
+            when {
+                expression { return env.GITHUB_TOKEN != null && env.GITHUB_TOKEN.length() > 0 }
+            }
             steps {
                 script {
                     echo '🔍 Buscando Pull Requests asociados al commit...'
 
-                    // Buscar PRs que contienen este commit
                     def prResponse = bat(
-                script: "@echo off & curl -s -H \"Authorization: Bearer ${env.GITHUB_TOKEN}\" " +
-                        '-H \"Accept: application/vnd.github+json\" ' +
-                        "\"https://api.github.com/repos/GAMR11/ecommerce-online/commits/${env.GIT_COMMIT_SHA}/pulls\"",
-                returnStdout: true
-            ).trim()
+                        script: '@echo off & curl -s ' +
+                                "-H \"Authorization: Bearer ${env.GITHUB_TOKEN}\" " +
+                                '-H \"Accept: application/vnd.github+json\" ' +
+                                '-H \"X-GitHub-Api-Version: 2022-11-28\" ' +
+                                "\"https://api.github.com/repos/GAMR11/ecommerce-online/commits/${env.GIT_COMMIT_SHA}/pulls\"",
+                        returnStdout: true
+                    ).trim()
 
                     bat "curl -s -X POST ${env.APP_URL}/api/metrics/github-pr-raw " +
-                '-H \"Content-Type: application/json\" ' +
-                "-d \"${prResponse.replace('"', '\\"')}\""
+                        '-H \"Content-Type: application/json\" ' +
+                        "-d \"${prResponse.replace('"', '\\"')}\""
 
-                    echo '📤 Datos de PR enviados'
+                    echo '📤 PR data enviada'
                 }
             }
         }
 
-        // ========================================
-        // STAGE 5: CAPTURAR DATOS DE GITHUB (OPCIONAL)
-        // ========================================
+        // ============================================================
+        // STAGE 7: GITHUB COMMIT DATA
+        // ============================================================
         stage('Capture GitHub Data') {
             when {
-                expression {
-                    // Solo ejecutar si tenemos token de GitHub
-                    return env.GITHUB_TOKEN != null && env.GITHUB_TOKEN.length() > 0
-                }
+                expression { return env.GITHUB_TOKEN != null && env.GITHUB_TOKEN.length() > 0 }
             }
             steps {
                 script {
                     echo '🔍 Capturando datos de GitHub...'
 
-                    // Los datos de GitHub los capturamos del commit que ya hicimos checkout
-                    // Puedes expandir esto para obtener info de PR, reviews, etc.
-
                     def githubData = JsonOutput.toJson([
-                        tool: 'github',
-                        commit_sha: env.GIT_COMMIT_SHA,
-                        branch: env.GIT_BRANCH,
-                        author: env.GIT_AUTHOR,
-                        message: env.GIT_MESSAGE,
-                        timestamp: env.COMMIT_TIME_ISO
+                        tool       : 'github',
+                        commit_sha : env.GIT_COMMIT_SHA,
+                        branch     : env.GIT_BRANCH,
+                        author     : env.GIT_AUTHOR,
+                        message    : env.GIT_MESSAGE,
+                        jira_keys  : env.JIRA_KEYS,
+                        timestamp  : env.COMMIT_TIME_ISO
                     ])
 
                     echo '📤 Enviando GitHub commit data...'
-                    bat "curl -X POST ${env.APP_URL}/api/metrics/github-commit " +
+                    bat "curl -s -X POST ${env.APP_URL}/api/metrics/github-commit " +
                         '-H \"Content-Type: application/json\" ' +
                         "-d \"${githubData.replace('"', '\\"')}\""
                 }
@@ -344,49 +385,80 @@ pipeline {
         }
     }
 
-    // ============================================
-    // POST: Si algo falla
-    // ============================================
+    // ============================================================
+    // POST — Acciones según resultado del pipeline
+    // ============================================================
     post {
-        failure {
+        success {
             script {
-                echo '❌ Pipeline FALLÓ - Registrando Incidente...'
-                def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
+                echo '✅ Pipeline exitoso — Comentando en Jira...'
 
-                // 1. Registrar como deployment fallido (para Change Failure Rate)
-                def failData = JsonOutput.toJson([
-                    tool: env.TOOL_NAME,
-                    build_number: env.BUILD_NUMBER,
-                    commit_sha: env.GIT_COMMIT_SHA ?: 'unknown',
-                    status: 'failure',
-                    is_failure: true,
-                    timestamp: nowIso
-                ])
-
-                bat "curl -X POST ${env.APP_URL}/api/metrics/deployment-result " +
-                    '-H \"Content-Type: application/json\" ' +
-                    "-d \"${failData.replace('"', '\\"')}\""
-
-                // 2. Crear incidente abierto (para MTTR)
-                def incidentData = JsonOutput.toJson([
-                    tool: env.TOOL_NAME,
-                    build_number: env.BUILD_NUMBER,
-                    commit_sha: env.GIT_COMMIT_SHA ?: 'unknown',
-                    status: 'open',
-                    severity: 'high',
-                    start_time: nowIso,
-                    description: "Build #${env.BUILD_NUMBER} failed",
-                    timestamp: nowIso
-                ])
-
-                bat "curl -X POST ${env.APP_URL}/api/metrics/incident " +
-                    '-H \"Content-Type: application/json\" ' +
-                    "-d \"${incidentData.replace('"', '\\"')}\""
+                // Agregar comentario automático en cada ticket detectado
+                if (env.JIRA_KEYS && env.JIRA_KEYS.trim() != '') {
+                    env.JIRA_KEYS.split(',').each { rawKey ->
+                        def issueKey = rawKey.trim()
+                        // buildJiraSuccessComment es @NonCPS — seguro, sin Matcher
+                        def comment  = buildJiraSuccessComment(
+                            env.BUILD_NUMBER, env.GIT_BRANCH, env.GIT_MESSAGE
+                        )
+                        bat 'curl -s -X POST ' +
+                            "-u \"${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN}\" " +
+                            '-H \"Content-Type: application/json\" ' +
+                            "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}/comment\" " +
+                            "-d \"${comment.replace('"', '\\"')}\""
+                        echo "💬 Comentario agregado en Jira: ${issueKey}"
+                    }
+                }
             }
         }
 
-        success {
-            echo '✅ Pipeline exitoso - Métricas registradas'
+        failure {
+            script {
+                echo '❌ Pipeline FALLÓ — Registrando incidente y notificando Jira...'
+                def nowIso = new Date().format('yyyy-MM-dd HH:mm:ss', TimeZone.getTimeZone('UTC'))
+
+                // ── Registrar deployment fallido (Change Failure Rate) ────────
+                def failData = JsonOutput.toJson([
+                    tool         : env.TOOL_NAME,
+                    build_number : env.BUILD_NUMBER,
+                    commit_sha   : env.GIT_COMMIT_SHA ?: 'unknown',
+                    status       : 'failure',
+                    is_failure   : true,
+                    timestamp    : nowIso
+                ])
+                bat "curl -s -X POST ${env.APP_URL}/api/metrics/deployment-result " +
+                    '-H \"Content-Type: application/json\" ' +
+                    "-d \"${failData.replace('"', '\\"')}\""
+
+                // ── Crear incidente abierto (MTTR) ────────────────────────────
+                def incidentData = JsonOutput.toJson([
+                    tool         : env.TOOL_NAME,
+                    build_number : env.BUILD_NUMBER,
+                    commit_sha   : env.GIT_COMMIT_SHA ?: 'unknown',
+                    status       : 'open',
+                    severity     : 'high',
+                    start_time   : nowIso,
+                    description  : "Build #${env.BUILD_NUMBER} failed on branch ${env.GIT_BRANCH ?: 'unknown'}",
+                    timestamp    : nowIso
+                ])
+                bat "curl -s -X POST ${env.APP_URL}/api/metrics/incident " +
+                    '-H \"Content-Type: application/json\" ' +
+                    "-d \"${incidentData.replace('"', '\\"')}\""
+
+                // ── Comentar en Jira con el fallo ─────────────────────────────
+                if (env.JIRA_KEYS && env.JIRA_KEYS.trim() != '') {
+                    env.JIRA_KEYS.split(',').each { rawKey ->
+                        def issueKey = rawKey.trim()
+                        def comment  = buildJiraFailureComment(env.BUILD_NUMBER, env.GIT_BRANCH ?: 'unknown')
+                        bat 'curl -s -X POST ' +
+                            "-u \"${env.JIRA_USERNAME}:${env.JIRA_API_TOKEN}\" " +
+                            '-H \"Content-Type: application/json\" ' +
+                            "\"${env.JIRA_URL}/rest/api/3/issue/${issueKey}/comment\" " +
+                            "-d \"${comment.replace('"', '\\"')}\""
+                        echo "💬 Notificación de fallo enviada a Jira: ${issueKey}"
+                    }
+                }
+            }
         }
     }
 }
