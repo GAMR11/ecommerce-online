@@ -81,9 +81,9 @@
 
 
                                 <div class="mb-4">
-                                    <label for="preciocredito" class="form-label">Cargar Imagenes</label>
+                                    <label for="imagenes" class="form-label">Cargar Imágenes</label>
                                     <input class="form-control" accept="image/*" type="file" name="imagenes[]"
-                                        multiple id="imagenes" />
+                                        multiple id="imagenes" onchange="validarFormulario()" />
                                 </div>
 
                                 <div class="d-flex justify-content-center align-items-center">
@@ -123,41 +123,42 @@
     @endif
 
     <script>
-       function validarFormulario()
-       {
-            const campos = ['nombre', 'marca', 'modelo', 'serie', 'color', 'categoria', 'preciooriginal', 'preciocontado', 'preciocredito'];
+       function validarFormulario() {
+            const campos = ['nombre', 'marca', 'modelo', 'serie', 'color', 'categoria',
+                            'preciooriginal', 'preciocontado', 'preciocredito'];
             let formularioValido = true;
             let camposFaltantes = [];
 
-            // Recorrer todos los campos y validar si están vacíos
             campos.forEach(id => {
                 const valor = document.getElementById(id).value.trim();
                 if (valor.length === 0) {
                     formularioValido = false;
-                    camposFaltantes.push(id); // Guardamos los campos vacíos
+                    camposFaltantes.push(id);
                 }
             });
 
-            // Referencia al botón de envío
+            // Validar que se haya cargado al menos una imagen
+            const inputImagenes = document.getElementById('imagenes');
+            if (!inputImagenes.files || inputImagenes.files.length === 0) {
+                formularioValido = false;
+                camposFaltantes.push('imagenes');
+            }
+
             const submitBtn = document.getElementById('submit-btn');
             submitBtn.disabled = !formularioValido;
 
-            // Si falta algún campo, mostrar alerta con SweetAlert
             return formularioValido;
         }
 
-        function enviarForm()
-        {
-            if(validarFormulario()==false)
-            {
+        function enviarForm() {
+            if (validarFormulario() == false) {
                 Swal.fire({
                     title: 'Atención',
-                    text: 'Faltan campos por llenar',
+                    text: 'Faltan campos por llenar o no se cargó ninguna imagen',
                     icon: 'warning',
                     confirmButtonText: 'OK'
                 });
-            }else
-            {
+            } else {
                 document.getElementById('formRegisterProduct').submit();
             }
         }
