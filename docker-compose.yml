@@ -4,36 +4,77 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
-    restart: always
-    working_dir: /var/www/html
+      dockerfile: docker/php/Dockerfile
+    container_name: ecommerce-app
+    working_dir: /var/www
     volumes:
-      - .:/var/www/html
+      - ./:/var/www
+      - /var/www/vendor
+      - /var/www/node_modules
+    networks:
+      - laravel_network
     environment:
-      DB_CONNECTION: mysql
-      DB_HOST: db
-      DB_PORT: 3306
-      DB_DATABASE: ${DB_DATABASE}
-      DB_USERNAME: ${DB_USERNAME}
-      DB_PASSWORD: ${DB_PASSWORD}
+      - APP_ENV=local
+      - APP_DEBUG=true
     depends_on:
-      - db
+      - mysql
+
+  nginx:
+    image: nginx:latest
+    container_name: ecommerce-nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./:/var/www
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
     networks:
       - laravel_network
 
-  db:
-    image: docker.io/library/mysql:8.0
-    restart: always
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      # Mapeamos la configuración de auto-carga
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      # Mapeamos donde están los archivos JSON
+      - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    networks:          # <--- AÑADE ESTO
+      - laravel_network # <--- AÑADE ESTO
     environment:
-      MYSQL_DATABASE: ${DB_DATABASE}
-      MYSQL_USER: ${DB_USERNAME}
-      MYSQL_PASSWORD: ${DB_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      - GF_SECURITY_ADMIN_PASSWORD=admin # Cambia esto luego
+
+  mysql:
+    image: mysql:8
+    container_name: ecommerce-mysql
+    restart: unless-stopped
     ports:
       - "3306:3306"
+    environment:
+      MYSQL_DATABASE: comgus_inventario
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: laravel
+      MYSQL_PASSWORD: laravel
+    volumes:
+      - mysql_data:/var/lib/mysql
     networks:
       - laravel_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "mysql"]
+      timeout: 20s
+      retries: 10
 
 networks:
   laravel_network:
     driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  grafana_data:
+    driver: local
