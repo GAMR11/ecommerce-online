@@ -12,180 +12,260 @@ use Illuminate\Support\Facades\DB;
 
 class MetricasController extends Controller
 {
-
-    /**
-     * CAPTURAR ISSUE DE JIRA
-     * Registra información del issue/ticket de Jira
-     */
+    // ============================================
+    // JIRA — Registrar issue desde Jenkins
+    // POST /api/metrics/jira-issue
+    // Recibe el payload envuelto que manda Jenkins:
+    // { type, tool, timestamp, data: { issue_key, ... } }
+    // ============================================
     public function recordJiraIssue(Request $request)
     {
-        $validated = $request->validate([
-            'tool' => 'required|string|in:jira,jenkins',
-            'issue_key' => 'required|string',
-            'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
-            'summary' => 'required|string',
-            'description' => 'nullable|string',
-            'status' => 'required|string|in:To Do,In Progress,In Review,Done',
-            'assignee' => 'required|string',
-            'reporter' => 'required|string',
-            'created_at' => 'required|date_format:Y-m-d H:i:s',
-            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
-            'sprint_id' => 'nullable|integer',
-            'story_points' => 'nullable|integer',
-        ]);
-
         try {
+            $payload = $request->all();
+
+            // Jenkins envía el issue_key dentro de 'data'
+            // Normalizamos para siempre tener $innerData con los campos reales
+            $innerData = (isset($payload['data']) && is_array($payload['data']))
+                ? $payload['data']
+                : $payload;
+
             $metric = Metric::create([
-                'type' => 'jira-issue',
-                'tool' => $validated['tool'],
-                'data' => json_encode($validated),
-                'timestamp' => now(),
+                'type'      => 'jira-issue',
+                'tool'      => $payload['tool'] ?? 'jenkins',
+                'data'      => $payload,          // guardamos todo tal cual llega
+                'timestamp' => $payload['timestamp'] ?? now(),
             ]);
 
             return response()->json([
-                'status' => 'recorded',
-                'id' => $metric->id,
-                'type' => 'jira-issue',
-                'issue_key' => $validated['issue_key'],
+                'status'    => 'recorded',
+                'id'        => $metric->id,
+                'type'      => 'jira-issue',
+                'issue_key' => $innerData['issue_key'] ?? null,
             ], 201);
 
         } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to record Jira issue',
+                'error'   => 'Failed to record Jira issue',
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
 
-    /**
-     * CAPTURAR SPRINT DE JIRA
-     * Registra información del sprint actual
-     */
-    public function recordJiraSprint(Request $request)
+    // ============================================
+    // JIRA — Recibir datos crudos de la API de Jira
+    // POST /api/metrics/jira-issue/from-api
+    // Recibe la respuesta JSON directa de:
+    // GET /rest/api/3/issue/{KEY}?fields=summary,status,...
+    // ============================================
+    public function captureJiraFromAPI(Request $request)
     {
-        // $validated = $request->validate([
-        //     'tool' => 'required|string|in:jira,jenkins',
-        //     'sprint_id' => 'required|integer',
-        //     'sprint_name' => 'required|string',
-        //     'start_date' => 'required|date_format:Y-m-d',
-        //     'end_date' => 'required|date_format:Y-m-d',
-        //     'goal' => 'nullable|string',
-        //     'state' => 'required|string|in:future,active,closed',
-        // ]);
-
         try {
-            Metric::create([
-                'type' => 'jira-sprint',
-                'tool' => $request->tool,
-                'data' => json_encode($request->all()),
+            $raw    = $request->all();
+            $fields = $raw['fields'] ?? [];
+
+            $issueKey  = $raw['key'] ?? null;
+            $status    = $fields['status']['name'] ?? null;
+            $assignee  = $fields['assignee']['displayName'] ?? 'Unassigned';
+            $createdAt = isset($fields['created'])
+                         ? date('Y-m-d H:i:s', strtotime($fields['created']))
+                         : null;
+            $updatedAt = isset($fields['updated'])
+                         ? date('Y-m-d H:i:s', strtotime($fields['updated']))
+                         : null;
+            $storyPts  = $fields['customfield_10016'] ?? null;
+            $priority  = $fields['priority']['name'] ?? null;
+            $issueType = $fields['issuetype']['name'] ?? null;
+            $summary   = $fields['summary'] ?? null;
+
+            $metric = Metric::create([
+                'type'      => 'jira_issue_api',
+                'tool'      => 'jira',
+                'data'      => [
+                    'issue_key'    => $issueKey,
+                    'summary'      => $summary,
+                    'status'       => $status,
+                    'assignee'     => $assignee,
+                    'issue_type'   => $issueType,
+                    'priority'     => $priority,
+                    'story_points' => $storyPts,
+                    'created_at'   => $createdAt,   // ← clave para Lead Time de negocio
+                    'updated_at'   => $updatedAt,
+                    'raw'          => $raw,
+                ],
                 'timestamp' => now(),
             ]);
 
             return response()->json([
-                'status' => 'recorded',
-                'id' => Metric::max('id'),
-                'type' => 'jira-sprint',
-                'sprint_name' => $request->sprint_name,
+                'status'       => 'recorded',
+                'id'           => $metric->id,
+                'type'         => 'jira_issue_api',
+                'issue_key'    => $issueKey,
+                'jira_status'  => $status,
+                'created_at'   => $createdAt,
             ], 201);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to record Jira sprint',
+                'error'   => 'Failed to capture Jira API data',
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
 
-    /**
-     * OBTENER ISSUES ASOCIADOS AL COMMIT ACTUAL
-     * Busca en la rama/commit message y devuelve issues relacionados
-     * Ejemplo: Si el commit message es "KAN-1: Update controller"
-     * extrae "KAN-1" y busca ese issue
-     */
-    public function getRelatedJiraIssues(Request $request)
+    // ============================================
+    // GITHUB — Recibir PRs crudos de la API de GitHub
+    // POST /api/metrics/github-pr-raw
+    // Recibe array JSON de PRs asociados al commit
+    // ============================================
+    public function captureGithubPRRaw(Request $request)
     {
-        // $validated = $request->validate([
-        //     'commit_message' => 'required|string',
-        //     'branch_name' => 'required|string',
-        // ]);
-
         try {
-            $issues = [];
+            $prs = $request->all();
 
-            // 1. Buscar en el commit message (patrón: KAN-123, PROJ-456, etc)
-            preg_match_all('/([A-Z]+-\d+)/', $request->commit_message, $matches);
-            $issuesFromMessage = array_unique($matches[1] ?? []);
-
-            // 2. Buscar en el branch name (patrón: feature/KAN-123-description)
-            preg_match_all('/([A-Z]+-\d+)/', $request->branch_name, $branchMatches);
-            $issuesFromBranch = array_unique($branchMatches[1] ?? []);
-
-            // 3. Combinar y deduplicar
-            $allIssueKeys = array_unique(array_merge($issuesFromMessage, $issuesFromBranch));
-
-            if (empty($allIssueKeys)) {
+            // La API de GitHub devuelve un array de PRs
+            // Si no hay PRs asociados al commit, el array llega vacío
+            if (empty($prs)) {
                 return response()->json([
-                    'status' => 'no_issues_found',
-                    'message' => 'No Jira issues found in commit message or branch name',
-                    'commit_message' => $request->commit_message,
-                    'branch_name' => $request->branch_name,
+                    'status'  => 'no_prs_found',
+                    'message' => 'No pull requests associated with this commit',
                 ], 200);
             }
 
-            // 4. Buscar en BD local (si tienes datos previos)
-            $localIssues = DB::table('metrics')
-                ->where('type', 'jira-issue')
-                ->get()
-                ->filter(function ($metric) use ($allIssueKeys) {
-                    $data = json_decode($metric->data, true);
-                    return in_array($data['issue_key'] ?? null, $allIssueKeys);
-                })
-                ->map(function ($metric) {
-                    return json_decode($metric->data, true);
-                })
-                ->values();
+            $saved = [];
+            foreach ($prs as $pr) {
+                // Calcular tiempo de review si el PR está mergeado
+                $reviewMinutes = null;
+                if (!empty($pr['created_at']) && !empty($pr['merged_at'])) {
+                    $reviewMinutes = Carbon::parse($pr['created_at'])
+                        ->diffInMinutes(Carbon::parse($pr['merged_at']));
+                }
+
+                $metric = Metric::create([
+                    'type'      => 'github_pr',
+                    'tool'      => 'github',
+                    'data'      => [
+                        'pr_number'      => $pr['number'] ?? null,
+                        'title'          => $pr['title'] ?? null,
+                        'state'          => $pr['state'] ?? null,
+                        'branch'         => $pr['head']['ref'] ?? null,
+                        'base_branch'    => $pr['base']['ref'] ?? null,
+                        'author'         => $pr['user']['login'] ?? null,
+                        'created_at'     => isset($pr['created_at'])
+                                            ? date('Y-m-d H:i:s', strtotime($pr['created_at']))
+                                            : null,
+                        'merged_at'      => isset($pr['merged_at'])
+                                            ? date('Y-m-d H:i:s', strtotime($pr['merged_at']))
+                                            : null,
+                        'review_minutes' => $reviewMinutes,  // tiempo de code review
+                        'raw'            => $pr,
+                    ],
+                    'timestamp' => now(),
+                ]);
+                $saved[] = $metric->id;
+            }
 
             return response()->json([
-                'status' => 'found',
-                'issue_keys_found' => $allIssueKeys,
-                'issues_from_db' => $localIssues,
-                'count' => count($localIssues),
-            ], 200);
-        } catch (\Exception $e) {
+                'status'     => 'recorded',
+                'prs_saved'  => count($saved),
+                'metric_ids' => $saved,
+            ], 201);
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to get related Jira issues',
+                'error'   => 'Failed to capture GitHub PR data',
                 'message' => $e->getMessage(),
             ], 500);
         }
     }
 
+    // ============================================
+    // GITHUB — Commit
+    // POST /api/metrics/github-commit
+    // ============================================
+    public function captureGithubCommit(Request $request)
+    {
+        try {
+            $data = $request->all();
+
+            $metric = Metric::create([
+                'type'      => 'github_commit',
+                'tool'      => 'github',
+                'data'      => $data,
+                'timestamp' => $data['timestamp'] ?? now(),
+            ]);
+
+            return response()->json([
+                'status' => 'recorded',
+                'type'   => 'github_commit',
+                'id'     => $metric->id,
+            ], 201);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to capture GitHub commit',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // ============================================
+    // JIRA — Sprint
+    // POST /api/metrics/jira-sprint
+    // ============================================
+    public function recordJiraSprint(Request $request)
+    {
+        try {
+            $metric = Metric::create([
+                'type'      => 'jira-sprint',
+                'tool'      => $request->input('tool', 'jira'),
+                'data'      => $request->all(),
+                'timestamp' => now(),
+            ]);
+
+            return response()->json([
+                'status'      => 'recorded',
+                'id'          => $metric->id,
+                'type'        => 'jira-sprint',
+                'sprint_name' => $request->input('sprint_name'),
+            ], 201);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to record Jira sprint',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // ============================================
+    // JIRA — Stats consolidados por issue
+    // GET /api/metrics/jira-stats
+    // ============================================
     public function getJiraCommitStats()
     {
         try {
             $stats = Metric::where('type', 'jira-issue')
                 ->get()
                 ->map(function ($metric) {
-                    // 1. Decodificar el JSON de la columna 'data'
-                    $content = is_array($metric->data) ? $metric->data : json_decode($metric->data, true);
-                    
-                    // Manejar posible doble encoding (si se guardó como string JSON)
+                    $content = is_array($metric->data)
+                               ? $metric->data
+                               : json_decode($metric->data, true);
+
                     if (is_string($content)) {
                         $content = json_decode($content, true);
                     }
 
-                    // 2. Normalizar: ¿Viene en la raíz o dentro de ['data']?
-                    // Los nuevos registros de Jenkins vienen envueltos en una llave 'data'
-                    $innerData = (isset($content['data']) && is_array($content['data'])) 
-                        ? $content['data'] 
-                        : $content;
+                    // Normalizar: Jenkins envuelve en 'data'
+                    $innerData = (isset($content['data']) && is_array($content['data']))
+                                 ? $content['data']
+                                 : $content;
 
                     return [
                         'issue_key'   => $innerData['issue_key'] ?? null,
                         'assignee'    => $innerData['assignee'] ?? null,
-                        // Usamos el timestamp de la métrica como fecha de actividad
                         'activity_at' => $metric->timestamp ?? $metric->created_at,
                     ];
                 })
-                // 3. Filtrar registros corruptos o sin llave para no ensuciar la estadística
                 ->filter(fn($item) => !empty($item['issue_key']))
                 ->groupBy('issue_key')
                 ->map(function ($group, $key) {
@@ -194,642 +274,421 @@ class MetricasController extends Controller
                         'total_commits_detected' => $group->count(),
                         'last_activity'          => $group->max('activity_at'),
                         'developers'             => $group->pluck('assignee')
-                                                        ->filter() // Quita nulos
+                                                        ->filter()
                                                         ->unique()
-                                                        ->values()
+                                                        ->values(),
                     ];
                 })
                 ->values();
 
-            return response()->json([
-                'status' => 'success',
-                'data' => $stats
-            ]);
-        } catch (\Exception $e) {
+            return response()->json(['status' => 'success', 'data' => $stats]);
+
+        } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * INTEGRACIÓN JIRA API (Opcional)
-     * Si tienes acceso a la API de Jira, obtén datos directamente desde allí
-     * Necesitas: JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN en .env
-     */
-    public function fetchJiraIssueFromAPI(Request $request)
+    // ============================================
+    // JIRA — Issues relacionados al commit
+    // POST /api/metrics/jira-issues/related
+    // ============================================
+    public function getRelatedJiraIssues(Request $request)
     {
-        // $validated = $request->validate([
-        //     'issue_key' => 'required|string', // KAN-1, KAN-2, etc
-        // ]);
-
         try {
-            $jiraUrl = env('JIRA_URL');
-            $jiraUsername = env('JIRA_USERNAME');
-            $jiraApiToken = env('JIRA_API_TOKEN');
+            preg_match_all('/([A-Z]+-\d+)/', $request->input('commit_message', ''), $m1);
+            preg_match_all('/([A-Z]+-\d+)/', $request->input('branch_name', ''), $m2);
+            $allKeys = array_unique(array_merge($m1[1] ?? [], $m2[1] ?? []));
 
-            if (!$jiraUrl || !$jiraUsername || !$jiraApiToken) {
-                return response()->json([
-                    'error' => 'Jira API credentials not configured',
-                    'message' => 'Set JIRA_URL, JIRA_USERNAME, JIRA_API_TOKEN in .env',
-                ], 400);
+            if (empty($allKeys)) {
+                return response()->json(['status' => 'no_issues_found'], 200);
             }
 
-            // Llamar a Jira API
-            $response = Http::withBasicAuth($jiraUsername, $jiraApiToken)
-                ->get("{$jiraUrl}/rest/api/3/issue/{$request->issue_key}");
+            $localIssues = DB::table('metrics')
+                ->where('type', 'jira-issue')
+                ->get()
+                ->filter(function ($metric) use ($allKeys) {
+                    $data = json_decode($metric->data, true);
+                    $inner = isset($data['data']) ? $data['data'] : $data;
+                    return in_array($inner['issue_key'] ?? null, $allKeys);
+                })
+                ->map(fn($m) => json_decode($m->data, true))
+                ->values();
 
-            if ($response->failed()) {
-                return response()->json([
-                    'error' => 'Failed to fetch from Jira API',
-                    'status' => $response->status(),
-                ], $response->status());
-            }
-
-            $issueData = $response->json();
-
-            // Extraer datos importantes
-            $extractedData = [
-                'tool' => 'jira-api',
-                'issue_key' => $issueData['key'],
-                'issue_type' => $issueData['fields']['issuetype']['name'] ?? 'Unknown',
-                'summary' => $issueData['fields']['summary'] ?? '',
-                'description' => $issueData['fields']['description'] ?? '',
-                'status' => $issueData['fields']['status']['name'] ?? 'Unknown',
-                'assignee' => $issueData['fields']['assignee']['displayName'] ?? 'Unassigned',
-                'reporter' => $issueData['fields']['reporter']['displayName'] ?? 'Unknown',
-                'created_at' => date('Y-m-d H:i:s', strtotime($issueData['fields']['created'] ?? now())),
-                'updated_at' => date('Y-m-d H:i:s', strtotime($issueData['fields']['updated'] ?? now())),
-                'story_points' => $issueData['fields']['customfield_10016'] ?? null, // Campo personalizado
-                'raw_data' => $issueData,
-            ];
-
-            // Guardar en BD
-            Metric::create([
-                'type' => 'jira-issue-api',
-                'tool' => 'jira-api',
-                'data' => json_encode($extractedData),
-                'timestamp' => now(),
+            return response()->json([
+                'status'          => 'found',
+                'issue_keys_found'=> $allKeys,
+                'issues_from_db'  => $localIssues,
+                'count'           => count($localIssues),
             ]);
 
-            return response()->json([
-                'status' => 'fetched_and_recorded',
-                'issue_key' => $extractedData['issue_key'],
-                'issue_type' => $extractedData['issue_type'],
-                'summary' => $extractedData['summary'],
-                'status' => $extractedData['status'],
-                'assignee' => $extractedData['assignee'],
-                'story_points' => $extractedData['story_points'],
-            ], 201);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to fetch Jira issue',
-                'message' => $e->getMessage(),
-            ], 500);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
-    /**
-     * OBTENER RESUMEN DE JIRA (Velocidad, Burndown, etc)
-     * Calcula métricas de productividad basadas en datos de Jira
-     */
+    // ============================================
+    // JIRA — Resumen de velocidad / burndown
+    // GET /api/metrics/jira-summary
+    // ============================================
     public function getJiraSummary(Request $request)
     {
-        $days = $request->get('days', 30);
+        $days = (int) $request->get('days', 30);
 
         try {
-            // Obtener todos los issues del período
             $issues = DB::table('metrics')
                 ->where('type', 'jira-issue')
                 ->where('timestamp', '>=', now()->subDays($days))
                 ->get()
                 ->map(function ($metric) {
-                    return json_decode($metric->data, true);
+                    $data = json_decode($metric->data, true);
+                    return isset($data['data']) ? $data['data'] : $data;
                 });
 
-            // Calcular estadísticas
-            $totalIssues = $issues->count();
-            $completedIssues = $issues->filter(fn($i) => $i['status'] === 'Done')->count();
-            $inProgressIssues = $issues->filter(fn($i) => $i['status'] === 'In Progress')->count();
-            $todoIssues = $issues->filter(fn($i) => $i['status'] === 'To Do')->count();
+            $total     = $issues->count();
+            $completed = $issues->filter(fn($i) => ($i['status'] ?? '') === 'Done')->count();
+            $inProg    = $issues->filter(fn($i) => ($i['status'] ?? '') === 'In Progress')->count();
+            $todo      = $issues->filter(fn($i) => ($i['status'] ?? '') === 'To Do')->count();
 
-            $totalStoryPoints = $issues->sum(fn($i) => $i['story_points'] ?? 0);
-            $completedStoryPoints = $issues
-                ->filter(fn($i) => $i['status'] === 'Done')
-                ->sum(fn($i) => $i['story_points'] ?? 0);
+            $totalSP     = $issues->sum(fn($i) => $i['story_points'] ?? 0);
+            $completedSP = $issues->filter(fn($i) => ($i['status'] ?? '') === 'Done')
+                                  ->sum(fn($i) => $i['story_points'] ?? 0);
 
-            // Calcular velocity (story points por día)
-            $velocity = $days > 0 ? round($completedStoryPoints / $days, 2) : 0;
-
-            // Calcular lead time promedio por issue
             $leadTimes = $issues
-                ->filter(fn($i) => $i['completed_at'] && $i['created_at'])
+                ->filter(fn($i) => !empty($i['completed_at']) && !empty($i['created_at']))
                 ->map(function ($i) {
-                    $created = new \DateTime($i['created_at']);
-                    $completed = new \DateTime($i['completed_at']);
-                    return $completed->diff($created)->days;
+                    return (new \DateTime($i['completed_at']))
+                        ->diff(new \DateTime($i['created_at']))->days;
                 });
-
-            $avgLeadTime = $leadTimes->isNotEmpty() ? round($leadTimes->avg(), 2) : 0;
 
             return response()->json([
-                'period_days' => $days,
-                'issues' => [
-                    'total' => $totalIssues,
-                    'completed' => $completedIssues,
-                    'in_progress' => $inProgressIssues,
-                    'todo' => $todoIssues,
-                    'completion_rate_percent' => $totalIssues > 0
-                        ? round(($completedIssues / $totalIssues) * 100, 2)
-                        : 0,
+                'period_days'  => $days,
+                'issues'       => [
+                    'total'                   => $total,
+                    'completed'               => $completed,
+                    'in_progress'             => $inProg,
+                    'todo'                    => $todo,
+                    'completion_rate_percent' => $total > 0
+                        ? round(($completed / $total) * 100, 2) : 0,
                 ],
                 'story_points' => [
-                    'total' => $totalStoryPoints,
-                    'completed' => $completedStoryPoints,
-                    'pending' => $totalStoryPoints - $completedStoryPoints,
-                    'completion_percent' => $totalStoryPoints > 0
-                        ? round(($completedStoryPoints / $totalStoryPoints) * 100, 2)
-                        : 0,
+                    'total'              => $totalSP,
+                    'completed'          => $completedSP,
+                    'pending'            => $totalSP - $completedSP,
+                    'completion_percent' => $totalSP > 0
+                        ? round(($completedSP / $totalSP) * 100, 2) : 0,
                 ],
-                'velocity' => [
-                    'story_points_per_day' => $velocity,
-                    'issues_per_day' => round($totalIssues / $days, 2),
+                'velocity'     => [
+                    'story_points_per_day' => $days > 0 ? round($completedSP / $days, 2) : 0,
+                    'issues_per_day'       => $days > 0 ? round($total / $days, 2) : 0,
                 ],
-                'lead_time' => [
-                    'average_days' => $avgLeadTime,
-                    'total_measured' => count($leadTimes),
+                'lead_time'    => [
+                    'average_days'   => $leadTimes->isNotEmpty() ? round($leadTimes->avg(), 2) : 0,
+                    'total_measured' => $leadTimes->count(),
                 ],
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to calculate Jira summary',
-                'message' => $e->getMessage(),
-            ], 500);
+
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
-     // ============================================
-    // NUEVOS ENDPOINTS PARA GITHUB
+
     // ============================================
-
-    /**
-     * Capturar datos de commit desde GitHub
-     * POST /api/metrics/github-commit
-     */
-    public function captureGithubCommit(Request $request)
-    {
-        $validated = $request->validate([
-            'tool' => 'required|string',
-            'commit_sha' => 'required|string',
-            'branch' => 'required|string',
-            'author' => 'required|string',
-            'message' => 'nullable|string',
-            'timestamp' => 'required|date_format:Y-m-d H:i:s'
-        ]);
-
-        $metric = Metric::create([
-            'type' => 'github_commit',
-            'tool' => 'github',
-            'data' => $validated,
-            'timestamp' => $validated['timestamp']
-        ]);
-
-        return response()->json([
-            'status' => 'recorded',
-            'type' => 'github_commit',
-            'id' => $metric->id
-        ], 201);
-    }
-
-    /**
-     * Capturar datos de Pull Request desde GitHub
-     * POST /api/metrics/github-pr
-     */
-    public function captureGithubPR(Request $request)
-    {
-        $validated = $request->validate([
-            'pr_number' => 'required|integer',
-            'title' => 'required|string',
-            'branch' => 'nullable|string',
-            'author' => 'required|string',
-            'created_at' => 'required|date_format:Y-m-d H:i:s',
-            'merged_at' => 'nullable|date_format:Y-m-d H:i:s',
-            'review_count' => 'nullable|integer',
-            'commits_count' => 'nullable|integer',
-        ]);
-
-        // Calcular tiempo de merge si existe
-        if ($validated['merged_at']) {
-            $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
-            $mergedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['merged_at']);
-            $validated['time_to_merge_minutes'] = $mergedTime->diffInMinutes($createdTime);
-        }
-
-        $metric = Metric::create([
-            'type' => 'github_pr',
-            'tool' => 'github',
-            'data' => $validated,
-            'timestamp' => $validated['created_at']
-        ]);
-
-        return response()->json([
-            'status' => 'recorded',
-            'type' => 'github_pr',
-            'id' => $metric->id
-        ], 201);
-    }
-    
+    // PROMETHEUS — Formato para Grafana scraping
+    // GET /api/metrics/prometheus
     // ============================================
-    // NUEVOS ENDPOINTS PARA JIRA
-    // ============================================
-
-    /**
-     * Capturar datos de Issue desde Jira
-     * POST /api/metrics/jira-issue
-     */
-    public function captureJiraIssue(Request $request)
-    {
-        $validated = $request->validate([
-            'issue_key' => 'required|string',      // ej: KAN-1
-            'issue_type' => 'required|string',     // Task, Bug, Feature, etc
-            'summary' => 'required|string',
-            'status' => 'required|string',         // To Do, In Progress, Done, etc
-            'assignee' => 'nullable|string',
-            'created_at' => 'required|date_format:Y-m-d H:i:s',
-            'updated_at' => 'nullable|date_format:Y-m-d H:i:s',
-            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
-            'story_points' => 'nullable|integer',
-            'sprint_name' => 'nullable|string'
-        ]);
-
-        // Calcular tiempo de completación
-        if ($validated['completed_at']) {
-            $createdTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['created_at']);
-            $completedTime = Carbon::createFromFormat('Y-m-d H:i:s', $validated['completed_at']);
-            $validated['time_to_complete_hours'] = $createdTime->diffInHours($completedTime);
-        }
-
-        $metric = Metric::create([
-            'type' => 'jira_issue',
-            'tool' => 'jira',
-            'data' => $validated,
-            'timestamp' => $validated['created_at']
-        ]);
-
-        return response()->json([
-            'status' => 'recorded',
-            'type' => 'jira_issue',
-            'id' => $metric->id,
-            'issue_key' => $validated['issue_key']
-        ], 201);
-    }
-
     public function prometheusMetrics()
     {
-        $tools = ['github-actions', 'jenkins'];
-        $output = "";
+        $tools  = ['github-actions', 'jenkins'];
+        $output = '';
 
         foreach ($tools as $tool) {
-            $metrics = $this->calculateMetricsForTool($tool, 30); // Usamos tu lógica existente
+            $metrics = $this->calculateMetricsForTool($tool, 30);
 
-            // Formato Prometheus: nombre_metrica{etiquetas} valor
             $output .= "# HELP dora_deployment_frequency Frecuencia de despliegue por dia\n";
             $output .= "# TYPE dora_deployment_frequency gauge\n";
-            $output .= "dora_deployment_frequency{tool=\"$tool\"} " . $metrics['deployment_frequency']['value'] . "\n\n";
+            $output .= "dora_deployment_frequency{tool=\"{$tool}\"} {$metrics['deployment_frequency']['value']}\n\n";
 
             $output .= "# HELP dora_lead_time_hours Tiempo promedio de cambios en horas\n";
             $output .= "# TYPE dora_lead_time_hours gauge\n";
-            $output .= "dora_lead_time_hours{tool=\"$tool\"} " . $metrics['lead_time']['hours'] . "\n\n";
+            $output .= "dora_lead_time_hours{tool=\"{$tool}\"} {$metrics['lead_time']['hours']}\n\n";
 
             $output .= "# HELP dora_change_failure_rate Porcentaje de fallos en cambios\n";
             $output .= "# TYPE dora_change_failure_rate gauge\n";
-            $output .= "dora_change_failure_rate{tool=\"$tool\"} " . $metrics['change_failure_rate']['percentage'] . "\n\n";
+            $output .= "dora_change_failure_rate{tool=\"{$tool}\"} {$metrics['change_failure_rate']['percentage']}\n\n";
 
             $output .= "# HELP dora_mttr_hours Tiempo medio de recuperacion en horas\n";
             $output .= "# TYPE dora_mttr_hours gauge\n";
-            $output .= "dora_mttr_hours{tool=\"$tool\"} " . $metrics['mttr']['hours'] . "\n";
+            $output .= "dora_mttr_hours{tool=\"{$tool}\"} {$metrics['mttr']['hours']}\n\n";
         }
 
         return response($output)->header('Content-Type', 'text/plain; version=0.0.4');
     }
-    // ============================================
-    // ALMACENAR MÉTRICAS
-    // ============================================
 
-    /**
-     * Almacenar una métrica genérica
-     */
+    // ============================================
+    // ALMACENAR MÉTRICAS GENÉRICAS
+    // POST /api/metrics/{type}
+    // type: deployment | leadtime | deployment-result | incident
+    // ============================================
     public function store(Request $request, string $type)
     {
-        // var_dump($request->all());
-        $validator = Validator::make($request->all(), [
-            // 'tool' => 'required|in:github-actions,jenkins',
-            'timestamp' => 'nullable|date',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
-        }
-
         try {
-
             $data = $request->all();
 
+            // Para leadtime calculamos segundos si vienen timestamps
             if ($type === 'leadtime') {
                 $now = Carbon::now();
-
-                // Lead Time Técnico: Desde el commit (eficiencia del dev)
                 if ($request->filled('commit_at')) {
                     $data['lead_time_seconds'] = $now->diffInSeconds(Carbon::parse($request->commit_at));
                 }
-
-                // Lead Time de Negocio: Desde Jira (agilidad organizacional)
                 if ($request->filled('jira_created_at')) {
                     $data['business_lead_time_seconds'] = $now->diffInSeconds(Carbon::parse($request->jira_created_at));
                 }
             }
 
             $metric = Metric::create([
-                'type' => $type,
-                'tool' => $request->tool,
-                'data' => $data,
-                'timestamp' => $request->timestamp ?? now(),
+                'type'      => $type,
+                'tool'      => $request->input('tool'),
+                'data'      => $data,
+                'timestamp' => $request->input('timestamp') ?? now(),
             ]);
 
             return response()->json([
                 'status' => 'recorded',
-                'id' => $metric->id,
-                'type' => $type,
-                'tool' => $request->tool,
+                'id'     => $metric->id,
+                'type'   => $type,
+                'tool'   => $request->input('tool'),
             ], 201);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to store metric',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to store metric',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
-    /**
-     * Resolver un incidente (MTTR)
-     */
+    // ============================================
+    // RESOLVER INCIDENTE (MTTR)
+    // POST /api/metrics/incident/resolve
+    // ============================================
     public function resolveIncident(Request $request)
     {
-        $validator = Validator::make($request->all(), [
-            // 'tool' => 'required|in:github-actions,jenkins',
-            'resolution_time' => 'required|date',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
-        }
-
         try {
+            $resolutionTime = $request->input('resolution_time');
+
+            if (!$resolutionTime) {
+                return response()->json([
+                    'error' => 'resolution_time is required',
+                ], 422);
+            }
+
             // Buscar el último incidente abierto para esta herramienta
             $incident = Metric::where('type', 'incident')
-                ->where('tool', $request->tool)
+                ->where('tool', $request->input('tool'))
                 ->whereNull('data->resolution_time')
                 ->latest('timestamp')
                 ->first();
 
             if (!$incident) {
                 return response()->json([
-                    'status' => 'no_open_incident',
-                    'message' => 'No open incident found to resolve'
+                    'status'  => 'no_open_incident',
+                    'message' => 'No open incident found to resolve',
                 ], 404);
             }
 
-            // Actualizar con tiempo de resolución
-            $data = $incident->data;
-            $data['resolution_time'] = $request->resolution_time;
-            $data['status'] = 'resolved';
-
+            $data                    = $incident->data;
+            $data['resolution_time'] = $resolutionTime;
+            $data['status']          = 'resolved';
             $incident->update(['data' => $data]);
 
-            // Calcular MTTR
-            $startTime = Carbon::parse($incident->data['start_time']);
-            $endTime = Carbon::parse($request->resolution_time);
-            $mttrSeconds = $endTime->diffInSeconds($startTime);
+            $mttrSeconds = Carbon::parse($incident->data['start_time'])
+                ->diffInSeconds(Carbon::parse($resolutionTime));
 
             return response()->json([
-                'status' => 'resolved',
-                'incident_id' => $incident->id,
+                'status'       => 'resolved',
+                'incident_id'  => $incident->id,
                 'mttr_seconds' => $mttrSeconds,
                 'mttr_minutes' => round($mttrSeconds / 60, 2),
             ], 200);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to resolve incident',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to resolve incident',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     // ============================================
-    // CONSULTAR MÉTRICAS DORA
+    // MÉTRICAS DORA DE UNA HERRAMIENTA
+    // GET /api/metrics/dora?tool=jenkins&period=30
     // ============================================
-
-    /**
-     * Obtener métricas DORA de una herramienta
-     */
     public function getDORAMetrics(Request $request)
     {
-        $tool = $request->query('tool');
+        $tool   = $request->query('tool');
         $period = (int) $request->query('period', 30);
 
         if (!$tool || !in_array($tool, ['github-actions', 'jenkins'])) {
             return response()->json([
-                'error' => 'Invalid tool parameter. Must be: github-actions or jenkins'
+                'error' => 'Invalid tool. Must be: github-actions or jenkins',
             ], 400);
         }
 
         $startDate = now()->subDays($period);
 
         try {
-            // MÉTRICA 1: Deployment Frequency
-            $deploymentsCount = Metric::ofType('deployment')
-                ->forTool($tool)
-                ->where('timestamp', '>=', $startDate)
-                ->count();
+            $deploymentsCount  = Metric::ofType('deployment')->forTool($tool)
+                                       ->where('timestamp', '>=', $startDate)->count();
+            $deploymentFreq    = $period > 0 ? $deploymentsCount / $period : 0;
 
-            $deploymentFrequency = $period > 0 ? $deploymentsCount / $period : 0;
+            $avgLeadTime       = Metric::ofType('leadtime')->forTool($tool)
+                                       ->where('timestamp', '>=', $startDate)
+                                       ->avg('data->lead_time_seconds');
 
-            // MÉTRICA 2: Lead Time for Changes
-            $avgLeadTime = Metric::ofType('leadtime')
-                ->forTool($tool)
-                ->where('timestamp', '>=', $startDate)
-                ->avg('data->lead_time_seconds');
+            $totalDeploys      = Metric::ofType('deployment-result')->forTool($tool)
+                                       ->where('timestamp', '>=', $startDate)->count();
+            $failedDeploys     = Metric::ofType('deployment-result')->forTool($tool)
+                                       ->where('data->is_failure', true)
+                                       ->where('timestamp', '>=', $startDate)->count();
+            $cfr               = $totalDeploys > 0
+                                 ? ($failedDeploys / $totalDeploys) * 100 : 0;
 
-            // MÉTRICA 3: Change Failure Rate
-            $totalDeployments = Metric::ofType('deployment-result')
-                ->forTool($tool)
-                ->where('timestamp', '>=', $startDate)
-                ->count();
-
-            $failedDeployments = Metric::ofType('deployment-result')
-                ->forTool($tool)
-                ->where('data->is_failure', true)
-                ->where('timestamp', '>=', $startDate)
-                ->count();
-
-            $changeFailureRate = $totalDeployments > 0
-                ? ($failedDeployments / $totalDeployments) * 100
-                : 0;
-
-            // MÉTRICA 4: Mean Time to Recovery (MTTR)
-            $resolvedIncidents = Metric::ofType('incident')
-                ->forTool($tool)
-                ->whereNotNull('data->resolution_time')
-                ->where('timestamp', '>=', $startDate)
-                ->get();
-
-            $recoveryTimes = $resolvedIncidents->map(function ($incident) {
-                $start = Carbon::parse($incident->data['start_time']);
-                $end = Carbon::parse($incident->data['resolution_time']);
-                return $end->diffInSeconds($start);
-            });
-
-            $mttr = $recoveryTimes->avg() ?? 0;
+            $resolvedIncidents = Metric::ofType('incident')->forTool($tool)
+                                       ->whereNotNull('data->resolution_time')
+                                       ->where('timestamp', '>=', $startDate)->get();
+            $mttr              = $resolvedIncidents->map(function ($i) {
+                return Carbon::parse($i->data['start_time'])
+                    ->diffInSeconds(Carbon::parse($i->data['resolution_time']));
+            })->avg() ?? 0;
 
             return response()->json([
-                'tool' => $tool,
-                'period_days' => $period,
-                'date_range' => [
+                'tool'         => $tool,
+                'period_days'  => $period,
+                'date_range'   => [
                     'from' => $startDate->toDateTimeString(),
-                    'to' => now()->toDateTimeString(),
+                    'to'   => now()->toDateTimeString(),
                 ],
-                'metrics' => [
-                    'deployment_frequency' => [
-                        'value' => round($deploymentFrequency, 2),
-                        'unit' => 'deployments/day',
-                        'count' => $deploymentsCount,
-                        'rating' => $this->rateDeploymentFrequency($deploymentFrequency),
+                'metrics'      => [
+                    'deployment_frequency'  => [
+                        'value'  => round($deploymentFreq, 2),
+                        'unit'   => 'deployments/day',
+                        'count'  => $deploymentsCount,
+                        'rating' => $this->rateDeploymentFrequency($deploymentFreq),
                     ],
                     'lead_time_for_changes' => [
                         'value_seconds' => round($avgLeadTime ?? 0, 2),
                         'value_minutes' => round(($avgLeadTime ?? 0) / 60, 2),
-                        'value_hours' => round(($avgLeadTime ?? 0) / 3600, 2),
-                        'unit' => 'hours',
-                        'rating' => $this->rateLeadTime($avgLeadTime ?? 0),
+                        'value_hours'   => round(($avgLeadTime ?? 0) / 3600, 2),
+                        'unit'          => 'hours',
+                        'rating'        => $this->rateLeadTime($avgLeadTime ?? 0),
                     ],
-                    'change_failure_rate' => [
-                        'value' => round($changeFailureRate, 2),
-                        'unit' => '%',
-                        'total_deployments' => $totalDeployments,
-                        'failed_deployments' => $failedDeployments,
-                        'rating' => $this->rateChangeFailureRate($changeFailureRate),
+                    'change_failure_rate'   => [
+                        'value'              => round($cfr, 2),
+                        'unit'               => '%',
+                        'total_deployments'  => $totalDeploys,
+                        'failed_deployments' => $failedDeploys,
+                        'rating'             => $this->rateChangeFailureRate($cfr),
                     ],
                     'mean_time_to_recovery' => [
-                        'value_seconds' => round($mttr, 2),
-                        'value_minutes' => round($mttr / 60, 2),
-                        'value_hours' => round($mttr / 3600, 2),
-                        'unit' => 'hours',
-                        'incidents_resolved' => $resolvedIncidents->count(),
-                        'rating' => $this->rateMTTR($mttr),
+                        'value_seconds'     => round($mttr, 2),
+                        'value_minutes'     => round($mttr / 60, 2),
+                        'value_hours'       => round($mttr / 3600, 2),
+                        'unit'              => 'hours',
+                        'incidents_resolved'=> $resolvedIncidents->count(),
+                        'rating'            => $this->rateMTTR($mttr),
                     ],
                 ],
                 'overall_rating' => $this->calculateOverallRating([
-                    $this->rateDeploymentFrequency($deploymentFrequency),
+                    $this->rateDeploymentFrequency($deploymentFreq),
                     $this->rateLeadTime($avgLeadTime ?? 0),
-                    $this->rateChangeFailureRate($changeFailureRate),
+                    $this->rateChangeFailureRate($cfr),
                     $this->rateMTTR($mttr),
                 ]),
             ], 200);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to calculate DORA metrics',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to calculate DORA metrics',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
-    /**
-     * Comparar métricas entre GitHub Actions y Jenkins
-     */
+    // ============================================
+    // COMPARACIÓN ENTRE STACKS
+    // GET /api/metrics/comparison?period=30
+    // ============================================
     public function getComparison(Request $request)
     {
         $period = (int) $request->query('period', 30);
 
         try {
-            $githubMetrics = $this->calculateMetricsForTool('github-actions', $period);
+            $githubMetrics  = $this->calculateMetricsForTool('github-actions', $period);
             $jenkinsMetrics = $this->calculateMetricsForTool('jenkins', $period);
 
             return response()->json([
                 'period_days' => $period,
-                'comparison' => [
+                'comparison'  => [
                     'github-actions' => $githubMetrics,
-                    'jenkins' => $jenkinsMetrics,
+                    'jenkins'        => $jenkinsMetrics,
                 ],
-                'winner' => $this->determineWinner($githubMetrics, $jenkinsMetrics),
+                'winner'      => $this->determineWinner($githubMetrics, $jenkinsMetrics),
             ], 200);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
-                'error' => 'Failed to generate comparison',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to generate comparison',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     // ============================================
-    // MÉTODOS PRIVADOS DE CLASIFICACIÓN DORA
+    // MÉTODOS PRIVADOS — Ratings DORA
     // ============================================
 
-    private function rateDeploymentFrequency(float $frequency): string
+    private function rateDeploymentFrequency(float $f): string
     {
-        if ($frequency >= 1) return 'Elite';        // On-demand (multiple per day)
-        if ($frequency >= 0.14) return 'High';      // Between once per week and once per month
-        if ($frequency >= 0.03) return 'Medium';    // Between once per month and once every 6 months
-        return 'Low';                                // Fewer than once per six months
+        if ($f >= 1)    return 'Elite';
+        if ($f >= 0.14) return 'High';
+        if ($f >= 0.03) return 'Medium';
+        return 'Low';
     }
 
     private function rateLeadTime(float $seconds): string
     {
-        $hours = $seconds / 3600;
-        if ($hours < 24) return 'Elite';      // Less than one day
-        if ($hours < 168) return 'High';      // Between one day and one week
-        if ($hours < 720) return 'Medium';    // Between one week and one month
-        return 'Low';                          // Between one month and six months
+        $h = $seconds / 3600;
+        if ($h < 24)  return 'Elite';
+        if ($h < 168) return 'High';
+        if ($h < 720) return 'Medium';
+        return 'Low';
     }
 
     private function rateChangeFailureRate(float $rate): string
     {
-        if ($rate <= 15) return 'Elite';      // 0-15%
-        if ($rate <= 30) return 'High';       // 16-30%
-        if ($rate <= 45) return 'Medium';     // 31-45%
-        return 'Low';                          // > 45%
+        if ($rate <= 15) return 'Elite';
+        if ($rate <= 30) return 'High';
+        if ($rate <= 45) return 'Medium';
+        return 'Low';
     }
 
     private function rateMTTR(float $seconds): string
     {
-        $hours = $seconds / 3600;
-        if ($hours < 1) return 'Elite';       // Less than one hour
-        if ($hours < 24) return 'High';       // Less than one day
-        if ($hours < 168) return 'Medium';    // Between one day and one week
-        return 'Low';                          // Between one week and one month
+        $h = $seconds / 3600;
+        if ($h < 1)   return 'Elite';
+        if ($h < 24)  return 'High';
+        if ($h < 168) return 'Medium';
+        return 'Low';
     }
 
     private function calculateOverallRating(array $ratings): string
     {
-        $scores = [
-            'Elite' => 4,
-            'High' => 3,
-            'Medium' => 2,
-            'Low' => 1,
-        ];
+        $scores = ['Elite' => 4, 'High' => 3, 'Medium' => 2, 'Low' => 1];
+        $avg    = array_sum(array_map(fn($r) => $scores[$r] ?? 0, $ratings)) / count($ratings);
 
-        $totalScore = 0;
-        foreach ($ratings as $rating) {
-            $totalScore += $scores[$rating] ?? 0;
-        }
-
-        $avgScore = $totalScore / count($ratings);
-
-        if ($avgScore >= 3.5) return 'Elite';
-        if ($avgScore >= 2.5) return 'High';
-        if ($avgScore >= 1.5) return 'Medium';
+        if ($avg >= 3.5) return 'Elite';
+        if ($avg >= 2.5) return 'High';
+        if ($avg >= 1.5) return 'Medium';
         return 'Low';
     }
 
@@ -837,68 +696,51 @@ class MetricasController extends Controller
     {
         $startDate = now()->subDays($period);
 
-        $deploymentsCount = Metric::ofType('deployment')
-            ->forTool($tool)
-            ->where('timestamp', '>=', $startDate)
-            ->count();
+        $deploymentsCount = Metric::ofType('deployment')->forTool($tool)
+                                  ->where('timestamp', '>=', $startDate)->count();
+        $deploymentFreq   = $period > 0 ? $deploymentsCount / $period : 0;
 
-        $deploymentFrequency = $period > 0 ? $deploymentsCount / $period : 0;
+        $avgLeadTime      = Metric::ofType('leadtime')->forTool($tool)
+                                  ->where('timestamp', '>=', $startDate)
+                                  ->avg('data->lead_time_seconds') ?? 0;
 
-        $avgLeadTime = Metric::ofType('leadtime')
-            ->forTool($tool)
-            ->where('timestamp', '>=', $startDate)
-            ->avg('data->lead_time_seconds') ?? 0;
+        $totalDeploys     = Metric::ofType('deployment-result')->forTool($tool)
+                                  ->where('timestamp', '>=', $startDate)->count();
+        $failedDeploys    = Metric::ofType('deployment-result')->forTool($tool)
+                                  ->where('data->is_failure', true)
+                                  ->where('timestamp', '>=', $startDate)->count();
+        $cfr              = $totalDeploys > 0
+                            ? ($failedDeploys / $totalDeploys) * 100 : 0;
 
-        $totalDeployments = Metric::ofType('deployment-result')
-            ->forTool($tool)
-            ->where('timestamp', '>=', $startDate)
-            ->count();
-
-        $failedDeployments = Metric::ofType('deployment-result')
-            ->forTool($tool)
-            ->where('data->is_failure', true)
-            ->where('timestamp', '>=', $startDate)
-            ->count();
-
-        $changeFailureRate = $totalDeployments > 0
-            ? ($failedDeployments / $totalDeployments) * 100
-            : 0;
-
-        $resolvedIncidents = Metric::ofType('incident')
-            ->forTool($tool)
-            ->whereNotNull('data->resolution_time')
-            ->where('timestamp', '>=', $startDate)
-            ->get();
-
-        $recoveryTimes = $resolvedIncidents->map(function ($incident) {
-            $start = Carbon::parse($incident->data['start_time']);
-            $end = Carbon::parse($incident->data['resolution_time']);
-            return $end->diffInSeconds($start);
-        });
-
-        $mttr = $recoveryTimes->avg() ?? 0;
+        $resolvedIncidents = Metric::ofType('incident')->forTool($tool)
+                                   ->whereNotNull('data->resolution_time')
+                                   ->where('timestamp', '>=', $startDate)->get();
+        $mttr              = $resolvedIncidents->map(function ($i) {
+            return Carbon::parse($i->data['start_time'])
+                ->diffInSeconds(Carbon::parse($i->data['resolution_time']));
+        })->avg() ?? 0;
 
         return [
             'deployment_frequency' => [
-                'value' => round($deploymentFrequency, 2),
-                'rating' => $this->rateDeploymentFrequency($deploymentFrequency),
+                'value'  => round($deploymentFreq, 2),
+                'rating' => $this->rateDeploymentFrequency($deploymentFreq),
             ],
-            'lead_time' => [
-                'hours' => round($avgLeadTime / 3600, 2),
+            'lead_time'            => [
+                'hours'  => round($avgLeadTime / 3600, 2),
                 'rating' => $this->rateLeadTime($avgLeadTime),
             ],
-            'change_failure_rate' => [
-                'percentage' => round($changeFailureRate, 2),
-                'rating' => $this->rateChangeFailureRate($changeFailureRate),
+            'change_failure_rate'  => [
+                'percentage' => round($cfr, 2),
+                'rating'     => $this->rateChangeFailureRate($cfr),
             ],
-            'mttr' => [
-                'hours' => round($mttr / 3600, 2),
+            'mttr'                 => [
+                'hours'  => round($mttr / 3600, 2),
                 'rating' => $this->rateMTTR($mttr),
             ],
-            'overall_rating' => $this->calculateOverallRating([
-                $this->rateDeploymentFrequency($deploymentFrequency),
+            'overall_rating'       => $this->calculateOverallRating([
+                $this->rateDeploymentFrequency($deploymentFreq),
                 $this->rateLeadTime($avgLeadTime),
-                $this->rateChangeFailureRate($changeFailureRate),
+                $this->rateChangeFailureRate($cfr),
                 $this->rateMTTR($mttr),
             ]),
         ];
@@ -906,31 +748,12 @@ class MetricasController extends Controller
 
     private function determineWinner(array $github, array $jenkins): array
     {
-        $scores = [
-            'Elite' => 4,
-            'High' => 3,
-            'Medium' => 2,
-            'Low' => 1,
-        ];
+        $scores = ['Elite' => 4, 'High' => 3, 'Medium' => 2, 'Low' => 1];
+        $gScore = $scores[$github['overall_rating']]  ?? 0;
+        $jScore = $scores[$jenkins['overall_rating']] ?? 0;
 
-        $githubScore = $scores[$github['overall_rating']];
-        $jenkinsScore = $scores[$jenkins['overall_rating']];
-
-        if ($githubScore > $jenkinsScore) {
-            return [
-                'tool' => 'github-actions',
-                'reason' => 'Better overall DORA performance',
-            ];
-        } elseif ($jenkinsScore > $githubScore) {
-            return [
-                'tool' => 'jenkins',
-                'reason' => 'Better overall DORA performance',
-            ];
-        } else {
-            return [
-                'tool' => 'tie',
-                'reason' => 'Both tools have equal DORA performance',
-            ];
-        }
+        if ($gScore > $jScore) return ['tool' => 'github-actions', 'reason' => 'Better overall DORA performance'];
+        if ($jScore > $gScore) return ['tool' => 'jenkins',        'reason' => 'Better overall DORA performance'];
+        return ['tool' => 'tie', 'reason' => 'Both tools have equal DORA performance'];
     }
 }

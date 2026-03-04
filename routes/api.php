@@ -4,61 +4,46 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\MetricasController;
 
-// ============================================
+// ============================================================
 // RUTAS DE MÉTRICAS DORA
-// ============================================
+// ============================================================
 
 Route::prefix('metrics')
+    ->middleware('metrics.api')
     ->group(function () {
 
-        Route::post('/github-commit', [MetricasController::class, 'captureGithubCommit']);
-        Route::post('/github-pr', [MetricasController::class, 'captureGithubPR']);
-        // Registrar un issue de Jira
-        Route::post('/jira-issue', [MetricasController::class, 'recordJiraIssue'])
-            ->name('metrics.jira-issue');
+        // ── GitHub ────────────────────────────────────────────
+        Route::post('/github-commit',  [MetricasController::class, 'captureGithubCommit']);
+        Route::post('/github-pr',      [MetricasController::class, 'captureGithubPR']);
+        Route::post('/github-pr-raw',  [MetricasController::class, 'captureGithubPRRaw']);   // ← NUEVO
 
-        // Registrar un sprint de Jira
-        Route::post('/jira-sprint', [MetricasController::class, 'recordJiraSprint'])
-            ->name('metrics.jira-sprint');
+        // ── Jira (actividad desde Jenkins) ───────────────────
+        Route::post('/jira-issue',          [MetricasController::class, 'recordJiraIssue']);
+        Route::post('/jira-issue/from-api', [MetricasController::class, 'captureJiraFromAPI']); // ← NUEVO
+        Route::post('/jira-sprint',         [MetricasController::class, 'recordJiraSprint']);
 
-        // ============================================================================
-        // JIRA DATA RETRIEVAL
-        // ============================================================================
+        // ── Jira (consultas) ──────────────────────────────────
+        Route::post('/jira-issues/related', [MetricasController::class, 'getRelatedJiraIssues']);
+        Route::get('/jira-summary',         [MetricasController::class, 'getJiraSummary']);
+        Route::get('/jira-stats',           [MetricasController::class, 'getJiraCommitStats']);
 
-        // Obtener issues relacionados al commit (analiza commit message y branch)
-        Route::post('/jira-issues/related', [MetricasController::class, 'getRelatedJiraIssues'])
-            ->name('metrics.jira-issues.related');
-
-        // Obtener un issue directamente desde Jira API
-        Route::post('/jira-issue/fetch', [MetricasController::class, 'fetchJiraIssueFromAPI'])
-            ->name('metrics.jira-issue.fetch');
-
-        // Obtener resumen de Jira (velocidad, burndown, etc)
-        Route::get('/jira-summary', [MetricasController::class, 'getJiraSummary'])
-            ->name('metrics.jira-summary');
-
-        Route::get('/metrics/prometheus', [MetricasController::class, 'prometheusMetrics']);
-
-        // Almacenar métricas
+        // ── Métricas DORA genéricas ───────────────────────────
+        // IMPORTANTE: la ruta /incident/resolve debe ir ANTES de /{type}
+        // para que Laravel no la interprete como type='incident' con sub-ruta
+        Route::post('/incident/resolve', [MetricasController::class, 'resolveIncident']);
         Route::post('/{type}', [MetricasController::class, 'store'])
             ->whereIn('type', ['deployment', 'leadtime', 'deployment-result', 'incident']);
 
-        // Resolver incidentes (MTTR)
-        Route::post('/incident/resolve', [MetricasController::class, 'resolveIncident']);
-
-        // Consultar métricas DORA
-        Route::get('/dora', [MetricasController::class, 'getDORAMetrics']);
-
-        // Comparar GitHub Actions vs Jenkins
+        // ── Consultas DORA ────────────────────────────────────
+        Route::get('/dora',       [MetricasController::class, 'getDORAMetrics']);
         Route::get('/comparison', [MetricasController::class, 'getComparison']);
-
-        Route::get('/jira-stats', [MetricasController::class, 'getJiraCommitStats']);
+        Route::get('/prometheus', [MetricasController::class, 'prometheusMetrics']);
     });
 
 // Ruta de prueba (sin autenticación)
 Route::get('/ping', function () {
     return response()->json([
-        'status' => 'ok',
+        'status'    => 'ok',
         'timestamp' => now()->toDateTimeString(),
     ]);
 });
