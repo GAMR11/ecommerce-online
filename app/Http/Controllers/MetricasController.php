@@ -19,40 +19,37 @@ class MetricasController extends Controller
      */
     public function recordJiraIssue(Request $request)
     {
-        // $validated = $request->validate([
-        //     'tool' => 'required|string|in:jira,jenkins',
-        //     'issue_key' => 'required|string', // KAN-1, KAN-2, etc
-        //     'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
-        //     'summary' => 'required|string',
-        //     'description' => 'nullable|string',
-        //     'status' => 'required|string|in:To Do,In Progress,In Review,Done',
-        //     'assignee' => 'required|string',
-        //     'reporter' => 'required|string',
-        //     'created_at' => 'required|date_format:Y-m-d H:i:s',
-        //     'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
-        //     'sprint_id' => 'nullable|integer',
-        //     'story_points' => 'nullable|integer',
-        // ]);
-        $payload = $request->all();
-
+        $validated = $request->validate([
+            'tool' => 'required|string|in:jira,jenkins',
+            'issue_key' => 'required|string',
+            'issue_type' => 'required|string|in:Task,Bug,Feature,Epic,Story,Subtask',
+            'summary' => 'required|string',
+            'description' => 'nullable|string',
+            'status' => 'required|string|in:To Do,In Progress,In Review,Done',
+            'assignee' => 'required|string',
+            'reporter' => 'required|string',
+            'created_at' => 'required|date_format:Y-m-d H:i:s',
+            'completed_at' => 'nullable|date_format:Y-m-d H:i:s',
+            'sprint_id' => 'nullable|integer',
+            'story_points' => 'nullable|integer',
+        ]);
 
         try {
-            // Guardar en tabla metrics (general)
-            Metric::create([
+            $metric = Metric::create([
                 'type' => 'jira-issue',
-                'tool' => 'jira',
-                'data' => json_encode($request->all()),
+                'tool' => $validated['tool'],
+                'data' => json_encode($validated),
                 'timestamp' => now(),
             ]);
 
-            $innerData = isset($payload['data']) ? $payload['data'] : $payload;
             return response()->json([
                 'status' => 'recorded',
-                'id' => Metric::max('id'),
+                'id' => $metric->id,
                 'type' => 'jira-issue',
-                'issue_key' => $innerData['issue_key'] ?? null,,
+                'issue_key' => $validated['issue_key'],
             ], 201);
-        } catch (\Exception $e) {
+
+        } catch (\Throwable $e) {
             return response()->json([
                 'error' => 'Failed to record Jira issue',
                 'message' => $e->getMessage(),
