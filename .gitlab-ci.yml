@@ -1,6 +1,6 @@
 # ================================================================
 # .gitlab-ci.yml — Stack 2
-# GitLab CI/CD + Podman + Trello + Metabase..
+# GitLab CI/CD + Podman + Trello + Metabase...
 # ================================================================
 
 stages:
