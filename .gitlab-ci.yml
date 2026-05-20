@@ -38,9 +38,9 @@ build_deploy:
   script:
     - echo "== BUILD Y DEPLOY CON PODMAN =="
     - echo "Deteniendo contenedores previos..."
-    - "try { & $env:PYTHON_EXE -m podman_compose -f podman-compose.yml down } catch { echo 'down completado' }"
+    - try { Start-Process -Wait -NoNewWindow $env:PYTHON_EXE -ArgumentList "-m podman_compose -f podman-compose.yml down" } catch { echo "down completado" }
     - echo "Construyendo e iniciando contenedores..."
-    - "& $env:PYTHON_EXE -m podman_compose -f podman-compose.yml up -d --build"
+    - Start-Process -Wait -NoNewWindow $env:PYTHON_EXE -ArgumentList "-m podman_compose -f podman-compose.yml up -d --build"
     - echo "Esperando 40 segundos para que MySQL inicie..."
     - Start-Sleep -Seconds 40
     - echo "Ejecutando migraciones..."
