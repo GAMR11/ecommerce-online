@@ -23,8 +23,8 @@ variables:
 
 before_script:
   - $env:PATH = "C:\Users\alvar\AppData\Local\Programs\Podman;$env:PATH"
-  - podman system connection add --default podman-machine "$env:PODMAN_URI" --identity "$env:PODMAN_IDENTITY" 2>$null; echo "Conexion Podman configurada"
-  - podman ps
+  - podman system connection add --default podman-machine "$env:PODMAN_URI" --identity "$env:PODMAN_IDENTITY" 2>$null
+  - podman --connection podman-machine ps
 
 # ================================================================
 # STAGE 1: BUILD & DEPLOY (Podman)
