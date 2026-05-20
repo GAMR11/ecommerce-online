@@ -75,8 +75,8 @@ pipeline {
         //   JIRA_API_TOKEN = credentials('jira-api-token')
         //
         // NUNCA pongas tokens en texto plano en el Jenkinsfile — están expuestos en Git.
-        JIRA_URL         = 'https://gestortareas.atlassian.net'   // sin slash al final
-        JIRA_USERNAME    = 'gamr130898@gmail.com'
+        JIRA_URL         = 'https://alvaros9881.atlassian.net'   // sin slash al final
+        JIRA_USERNAME    = 'alvaros9881@gmail.com'
         JIRA_API_TOKEN   = credentials('API TOKEN JIRA')          // crea este credential
     }
 
