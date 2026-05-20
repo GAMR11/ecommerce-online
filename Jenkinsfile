@@ -69,7 +69,7 @@ pipeline {
         GITHUB_TOKEN     = credentials('token-api-jenkins')
 
         // ⚠️  IMPORTANTE: Mueve estas credenciales a Jenkins Credentials Manager
-        // comment.
+        // comment2.
         // Panel Jenkins → Manage Jenkins → Credentials → Add Credential (Secret text)
         // ID sugerido: 'jira-api-token'
         // Una vez hecho, reemplaza las líneas de abajo por:
