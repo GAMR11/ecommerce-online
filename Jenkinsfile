@@ -6,7 +6,7 @@ import groovy.json.JsonOutput
 // Los objetos java.util.regex.Matcher NO son serializables,
 // por lo que DEBEN vivir dentro de funciones @NonCPS.
 // Estas funciones se ejecutan de forma no continuable (no pausan).
-// pd...
+// pd....
 // ================================================================
 
 @NonCPS
