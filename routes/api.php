@@ -15,7 +15,12 @@ Route::prefix('metrics')
         // ── GitHub ────────────────────────────────────────────
         Route::post('/github-commit',  [MetricasController::class, 'captureGithubCommit']);
         Route::post('/github-pr',      [MetricasController::class, 'captureGithubPR']);
-        Route::post('/github-pr-raw',  [MetricasController::class, 'captureGithubPRRaw']);   // ← NUEVO
+        Route::post('/github-pr-raw',  [MetricasController::class, 'captureGithubPRRaw']);
+
+        // ── GitLab + Trello (Stack 2) ─────────────────────────
+        Route::post('/trello-issue',  [MetricasController::class, 'recordTrelloIssue']);
+        Route::post('/gitlab-commit', [MetricasController::class, 'captureGitlabCommit']);
+        Route::post('/gitlab-mr',     [MetricasController::class, 'captureGitlabMR']);
 
         // ── Jira (actividad desde Jenkins) ───────────────────
         Route::post('/jira-issue',          [MetricasController::class, 'recordJiraIssue']);

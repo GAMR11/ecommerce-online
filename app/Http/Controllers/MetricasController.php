@@ -746,6 +746,119 @@ class MetricasController extends Controller
         ];
     }
 
+    // ============================================
+    // TRELLO — Registrar issue desde GitLab CI
+    // POST /api/metrics/trello-issue
+    // ============================================
+    public function recordTrelloIssue(Request $request)
+    {
+        try {
+            $payload   = $request->all();
+            $innerData = (isset($payload['data']) && is_array($payload['data']))
+                ? $payload['data']
+                : $payload;
+
+            $metric = Metric::create([
+                'type'      => 'trello-issue',
+                'tool'      => $payload['tool'] ?? 'trello',
+                'data'      => $payload,
+                'timestamp' => $payload['timestamp'] ?? now(),
+            ]);
+
+            return response()->json([
+                'status'    => 'recorded',
+                'id'        => $metric->id,
+                'type'      => 'trello-issue',
+                'issue_key' => $innerData['issue_key'] ?? null,
+            ], 201);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to record Trello issue',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // ============================================
+    // GITLAB — Commit
+    // POST /api/metrics/gitlab-commit
+    // ============================================
+    public function captureGitlabCommit(Request $request)
+    {
+        try {
+            $data = $request->all();
+
+            $metric = Metric::create([
+                'type'      => 'gitlab_commit',
+                'tool'      => 'gitlab',
+                'data'      => $data,
+                'timestamp' => $data['timestamp'] ?? now(),
+            ]);
+
+            return response()->json([
+                'status' => 'recorded',
+                'type'   => 'gitlab_commit',
+                'id'     => $metric->id,
+            ], 201);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to capture GitLab commit',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    // ============================================
+    // GITLAB — Merge Request
+    // POST /api/metrics/gitlab-mr
+    // ============================================
+    public function captureGitlabMR(Request $request)
+    {
+        try {
+            $data = $request->all();
+
+            $reviewMinutes = null;
+            if (!empty($data['created_at']) && !empty($data['merged_at'])) {
+                $reviewMinutes = Carbon::parse($data['created_at'])
+                    ->diffInMinutes(Carbon::parse($data['merged_at']));
+            }
+
+            $metric = Metric::create([
+                'type'      => 'gitlab_mr',
+                'tool'      => 'gitlab',
+                'data'      => [
+                    'mr_iid'         => $data['mr_iid']      ?? null,
+                    'title'          => $data['title']        ?? null,
+                    'state'          => $data['state']        ?? null,
+                    'branch'         => $data['branch']       ?? null,
+                    'base_branch'    => $data['base_branch']  ?? 'master',
+                    'author'         => $data['author']       ?? null,
+                    'created_at'     => $data['created_at']   ?? null,
+                    'merged_at'      => $data['merged_at']    ?? null,
+                    'review_minutes' => $reviewMinutes,
+                    'raw'            => $data,
+                ],
+                'timestamp' => $data['timestamp'] ?? now(),
+            ]);
+
+            return response()->json([
+                'status'         => 'recorded',
+                'id'             => $metric->id,
+                'type'           => 'gitlab_mr',
+                'mr_iid'         => $data['mr_iid'] ?? null,
+                'review_minutes' => $reviewMinutes,
+            ], 201);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to capture GitLab MR',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     private function determineWinner(array $github, array $jenkins): array
     {
         $scores = ['Elite' => 4, 'High' => 3, 'Medium' => 2, 'Low' => 1];
