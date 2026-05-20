@@ -101,16 +101,7 @@ trello_integration:
     - $data = @{ tool="trello"; timestamp=$env:CI_JOB_STARTED_AT; data=@{ issue_key=$env:CI_COMMIT_REF_NAME; summary=$env:CI_COMMIT_MESSAGE; assignee=$env:CI_COMMIT_AUTHOR; branch=$env:CI_COMMIT_REF_NAME; commit_sha=$env:CI_COMMIT_SHA; status="In Progress" } }
     - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/trello-issue" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json -Depth 5)
     - echo "Trello issue registrado"
-    - $matches = [regex]::Matches($env:CI_COMMIT_MESSAGE, 'TRELLO-([a-zA-Z0-9]+)')
-    - if ($matches.Count -gt 0) {
-        foreach ($match in $matches) {
-          $cardId = $match.Groups[1].Value;
-          echo "Comentando en tarjeta Trello $cardId...";
-          $comment = "[OK] Deploy exitoso | Pipeline #$env:CI_PIPELINE_IID | Branch $env:CI_COMMIT_REF_NAME | $env:CI_COMMIT_MESSAGE";
-          $trelloUrl = "https://api.trello.com/1/cards/$cardId/actions/comments?key=$env:TRELLO_API_KEY&token=$env:TRELLO_TOKEN";
-          try { Invoke-RestMethod -Uri $trelloUrl -Method POST -ContentType "application/json" -Body (@{ text=$comment } | ConvertTo-Json); echo "Comentario agregado en Trello $cardId" } catch { echo "No se pudo comentar en Trello $cardId" }
-        }
-      } else { echo "No se detectaron tarjetas TRELLO en el commit message" }
+    - "$matches = [regex]::Matches($env:CI_COMMIT_MESSAGE, 'TRELLO-([a-zA-Z0-9]+)'); if ($matches.Count -gt 0) { foreach ($match in $matches) { $cardId = $match.Groups[1].Value; $comment = '[OK] Deploy exitoso | Pipeline #' + $env:CI_PIPELINE_IID + ' | Branch ' + $env:CI_COMMIT_REF_NAME + ' | ' + $env:CI_COMMIT_MESSAGE; $trelloUrl = 'https://api.trello.com/1/cards/' + $cardId + '/actions/comments?key=' + $env:TRELLO_API_KEY + '&token=' + $env:TRELLO_TOKEN; try { Invoke-RestMethod -Uri $trelloUrl -Method POST -ContentType 'application/json' -Body (@{ text=$comment } | ConvertTo-Json); echo \"Comentario agregado en Trello $cardId\" } catch { echo \"No se pudo comentar en Trello $cardId\" } } } else { echo 'No se detectaron tarjetas TRELLO en el commit message' }"
   when: on_success
 
 # ================================================================
