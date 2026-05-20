@@ -1,0 +1,127 @@
+# ================================================================
+# .gitlab-ci.yml — Stack 2
+# GitLab CI/CD + Podman + Trello + Metabase
+# ================================================================
+
+stages:
+  - build_deploy
+  - test
+  - track_metrics
+  - trello_integration
+  - gitlab_mr_data
+
+variables:
+  # Valores por defecto — sobreescribir en GitLab: Settings > CI/CD > Variables
+  APP_URL: "http://localhost:8001"
+  TOOL_NAME: "gitlab"
+  APP_CONTAINER: "ecommerce-app"
+  DB_CONTAINER: "ecommerce-mysql"
+  # METRICS_API_KEY   → definir en GitLab CI/CD Variables (protegida)
+  # PODMAN_IDENTITY   → definir en GitLab CI/CD Variables (ruta local al identity file de Podman)
+  # PODMAN_URI        → definir en GitLab CI/CD Variables (URI del socket de Podman)
+  # PYTHON_EXE        → definir en GitLab CI/CD Variables (ruta al ejecutable python, ej: C:\Python314\python.exe)
+
+before_script:
+  - podman system connection add --default podman-machine "$env:PODMAN_URI" --identity "$env:PODMAN_IDENTITY" 2>$null; echo "Conexion Podman configurada"
+  - podman ps
+
+# ================================================================
+# STAGE 1: BUILD & DEPLOY (Podman)
+# ================================================================
+build_deploy:
+  stage: build_deploy
+  tags:
+    - ecommerce
+  script:
+    - echo "== BUILD Y DEPLOY CON PODMAN =="
+    - echo "Deteniendo contenedores previos..."
+    - $env:PYTHON_EXE -m podman_compose -f podman-compose.yml down 2>$null; echo "down completado"
+    - echo "Construyendo e iniciando contenedores..."
+    - $env:PYTHON_EXE -m podman_compose -f podman-compose.yml up -d --build
+    - echo "Esperando 40 segundos para que MySQL inicie..."
+    - Start-Sleep -Seconds 40
+    - echo "Ejecutando migraciones..."
+    - podman exec $env:APP_CONTAINER php artisan migrate --force
+    - echo "Limpiando cache..."
+    - podman exec $env:APP_CONTAINER php artisan cache:clear
+    - podman exec $env:APP_CONTAINER php artisan config:clear
+    - echo "Build y deploy completado"
+
+# ================================================================
+# STAGE 2: TESTS
+# ================================================================
+test:
+  stage: test
+  tags:
+    - ecommerce
+  script:
+    - echo "== EJECUTANDO TESTS =="
+    - podman exec $env:APP_CONTAINER php artisan test
+    - echo "Tests completados"
+
+# ================================================================
+# STAGE 3: MÉTRICAS DORA
+# ================================================================
+track_metrics:
+  stage: track_metrics
+  tags:
+    - ecommerce
+  script:
+    - echo "== REGISTRANDO METRICAS DORA =="
+    - echo "1 de 4 - Registrando deployment..."
+    - $data = @{ tool="gitlab"; build_number=$env:CI_PIPELINE_IID; build_duration_seconds=80; test_duration_seconds=10; commit_sha=$env:CI_COMMIT_SHA; commit_author=$env:CI_COMMIT_AUTHOR; commit_message=$env:CI_COMMIT_MESSAGE; commit_timestamp=$env:CI_COMMIT_TIMESTAMP; branch=$env:CI_COMMIT_REF_NAME; status="success"; is_failure=$false; environment="prod"; deployed_at=$env:CI_JOB_STARTED_AT; timestamp=$env:CI_JOB_STARTED_AT }
+    - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/deployment" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json)
+    - echo "2 de 4 - Registrando lead time..."
+    - $data = @{ tool="gitlab"; commit_sha=$env:CI_COMMIT_SHA; commit_timestamp=$env:CI_COMMIT_TIMESTAMP; deployment_timestamp=$env:CI_JOB_STARTED_AT; pipeline_created=$env:CI_PIPELINE_CREATED_AT; branch=$env:CI_COMMIT_REF_NAME; timestamp=$env:CI_JOB_STARTED_AT }
+    - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/leadtime" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json)
+    - echo "3 de 4 - Registrando deployment-result..."
+    - $data = @{ tool="gitlab"; build_number=$env:CI_PIPELINE_IID; commit_sha=$env:CI_COMMIT_SHA; status="success"; is_failure=$false; timestamp=$env:CI_JOB_STARTED_AT }
+    - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/deployment-result" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json)
+    - echo "4 de 4 - Resolviendo incidentes..."
+    - $data = @{ tool="gitlab"; resolved_by="gitlab-automation"; resolution_time=$env:CI_JOB_STARTED_AT; timestamp=$env:CI_JOB_STARTED_AT }
+    - try { Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/incident/resolve" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json) } catch { echo "Sin incidentes previos" }
+    - echo "Metricas DORA registradas"
+  when: on_success
+
+# ================================================================
+# STAGE 4: TRELLO INTEGRATION
+# ================================================================
+trello_integration:
+  stage: trello_integration
+  tags:
+    - ecommerce
+  script:
+    - echo "== INTEGRACION TRELLO =="
+    - $data = @{ tool="trello"; timestamp=$env:CI_JOB_STARTED_AT; data=@{ issue_key=$env:CI_COMMIT_REF_NAME; summary=$env:CI_COMMIT_MESSAGE; assignee=$env:CI_COMMIT_AUTHOR; branch=$env:CI_COMMIT_REF_NAME; commit_sha=$env:CI_COMMIT_SHA; status="In Progress" } }
+    - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/trello-issue" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json -Depth 5)
+    - echo "Trello issue registrado"
+  when: on_success
+
+# ================================================================
+# STAGE 5: GITLAB COMMIT DATA
+# ================================================================
+gitlab_mr_data:
+  stage: gitlab_mr_data
+  tags:
+    - ecommerce
+  script:
+    - echo "== CAPTURANDO DATOS DE GITLAB =="
+    - $data = @{ tool="gitlab"; commit_sha=$env:CI_COMMIT_SHA; branch=$env:CI_COMMIT_REF_NAME; author=$env:CI_COMMIT_AUTHOR; message=$env:CI_COMMIT_MESSAGE; timestamp=$env:CI_COMMIT_TIMESTAMP }
+    - Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/gitlab-commit" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json)
+    - echo "GitLab commit registrado"
+  when: on_success
+
+# ================================================================
+# ON FAILURE
+# ================================================================
+on_failure:
+  stage: track_metrics
+  tags:
+    - ecommerce
+  script:
+    - echo "== PIPELINE FALLO =="
+    - $data = @{ tool="gitlab"; build_number=$env:CI_PIPELINE_IID; commit_sha=$env:CI_COMMIT_SHA; status="failure"; is_failure=$true; timestamp=$env:CI_JOB_STARTED_AT }
+    - try { Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/deployment-result" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json) } catch { echo "No se pudo registrar deployment-result" }
+    - $data = @{ tool="gitlab"; build_number=$env:CI_PIPELINE_IID; commit_sha=$env:CI_COMMIT_SHA; status="open"; severity="high"; start_time=$env:CI_JOB_STARTED_AT; description="Pipeline $env:CI_PIPELINE_IID failed"; timestamp=$env:CI_JOB_STARTED_AT }
+    - try { Invoke-RestMethod -Uri "$env:APP_URL/api/metrics/incident" -Method POST -ContentType "application/json" -Headers @{"X-API-KEY"="$env:METRICS_API_KEY"} -Body ($data | ConvertTo-Json) } catch { echo "No se pudo registrar incidente" }
+  when: on_failure

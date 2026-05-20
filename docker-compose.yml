@@ -39,7 +39,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - grafana_data:/var/lib/grafana
+      - ecommerce-ci_grafana_data:/var/lib/grafana
       # Mapeamos la configuración de auto-carga
       - ./docker/grafana/provisioning:/etc/grafana/provisioning
       # Mapeamos donde están los archivos JSON
@@ -61,7 +61,7 @@ services:
       MYSQL_USER: laravel
       MYSQL_PASSWORD: laravel
     volumes:
-      - mysql_data:/var/lib/mysql
+      - ecommerce-ci_mysql_data:/var/lib/mysql
     networks:
       - laravel_network
     healthcheck:
@@ -74,7 +74,7 @@ networks:
     driver: bridge
 
 volumes:
-  mysql_data:
-    driver: local
-  grafana_data:
-    driver: local
+  ecommerce-ci_mysql_data:
+    external: true
+  ecommerce-ci_grafana_data:
+    external: true

@@ -1,0 +1,79 @@
+version: '3.8'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ecommerce-app
+    working_dir: /var/www
+    volumes:
+      - app_public:/var/www/public
+    networks:
+      - laravel_network
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+    depends_on:
+      - mysql
+
+  nginx:
+    image: docker.io/library/nginx:latest
+    container_name: ecommerce-nginx
+    restart: unless-stopped
+    ports:
+      - "8001:80"
+    volumes:
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - app_public:/var/www/public
+    depends_on:
+      - app
+    networks:
+      - laravel_network
+
+  mysql:
+    image: docker.io/library/mysql:8
+    container_name: ecommerce-mysql
+    restart: unless-stopped
+    ports:
+      - "3307:3306"
+    environment:
+      MYSQL_DATABASE: comgus_inventario
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_USER: laravel
+      MYSQL_PASSWORD: laravel
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - laravel_network
+
+  metabase:
+    image: docker.io/metabase/metabase:latest
+    container_name: ecommerce-metabase
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      MB_DB_TYPE: mysql
+      MB_DB_DBNAME: comgus_inventario
+      MB_DB_PORT: 3306
+      MB_DB_USER: root
+      MB_DB_PASS: root
+      MB_DB_HOST: mysql
+    depends_on:
+      - mysql
+    volumes:
+      - metabase_data:/metabase-data
+    networks:
+      - laravel_network
+
+networks:
+  laravel_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  metabase_data:
+    driver: local
+  app_public:
+    driver: local
