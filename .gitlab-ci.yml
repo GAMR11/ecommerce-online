@@ -59,6 +59,7 @@ test:
     - ecommerce
   script:
     - echo "== EJECUTANDO TESTS =="
+    - exit 1
     - podman exec $env:APP_CONTAINER php artisan test
     - echo "Tests completados"
 
