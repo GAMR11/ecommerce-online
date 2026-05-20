@@ -23,6 +23,7 @@ variables:
 
 before_script:
   - $env:PATH = "C:\Users\alvar\AppData\Local\Programs\Podman;$env:PATH"
+  - echo "URI=$env:PODMAN_URI IDENTITY=$env:PODMAN_IDENTITY"
   - try { podman system connection rm podman-machine 2>$null } catch {}
   - try { podman system connection add --default podman-machine "$env:PODMAN_URI" --identity "$env:PODMAN_IDENTITY" } catch { echo "conexion ya existe" }
   - podman --connection podman-machine ps
