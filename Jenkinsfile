@@ -161,6 +161,10 @@ pipeline {
                     env.DOCKER_BUILD_DURATION = ((long)(System.currentTimeMillis() / 1000) - env.DOCKER_BUILD_START.toLong()).toString()
                     echo "🐳 Docker build: ${env.DOCKER_BUILD_DURATION}s"
 
+                    // Esperar a que MySQL pase su healthcheck antes de migrar
+                    echo '⏳ Esperando a que MySQL esté listo...'
+                    bat '@echo off & :loop & docker inspect --format "{{.State.Health.Status}}" ecommerce-mysql | findstr "healthy" || (timeout /t 5 /nobreak >nul & goto loop)'
+
                     echo '📊 Migraciones y Limpieza...'
                     bat 'docker compose exec -T app php artisan migrate --force --seed'
                     bat 'docker compose exec -T app php artisan cache:clear'
