@@ -7,7 +7,7 @@ import groovy.json.JsonOutput
 // por lo que DEBEN vivir dentro de funciones @NonCPS.
 // Estas funciones se ejecutan de forma no continuable (no pausan).
 // pd....
-// ================================================================
+//==================================================================
 
 @NonCPS
 def extractJiraKeys(String text) {
