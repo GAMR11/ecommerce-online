@@ -43,7 +43,7 @@ services:
       - grafana_data:/var/lib/grafana
       # Mapeamos la configuración de auto-carga
       - ./docker/grafana/provisioning:/etc/grafana/provisioning
-      # Mapeamos donde están los archivos JSON
+      # Mapeamos donde están los archivos JSON #
       - ./docker/grafana/dashboards:/etc/grafana/provisioning/dashboards
     networks:          # <--- AÑADE ESTO
       - laravel_network # <--- AÑADE ESTO
