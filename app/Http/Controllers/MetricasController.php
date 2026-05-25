@@ -431,7 +431,7 @@ class MetricasController extends Controller
     // ============================================
     public function store(Request $request, string $type)
     {
-        //
+        ////
         try {
             $data = $request->all();
 
