@@ -30,6 +30,7 @@ Route::prefix('metrics')
         // ── Métricas DORA genéricas ───────────────────────────
         // IMPORTANTE: la ruta /incident/resolve debe ir ANTES de /{type}
         // para que Laravel no la interprete como type='incident' con sub-ruta
+        //
         Route::post('/incident/resolve', [MetricasController::class, 'resolveIncident']);
         Route::post('/{type}', [MetricasController::class, 'store'])
             ->whereIn('type', ['deployment', 'leadtime', 'deployment-result', 'incident']);
@@ -41,7 +42,7 @@ Route::prefix('metrics')
     });
 
 // Ruta de prueba (sin autenticación)
-Route::get('/ping', de () {
+Route::get('/ping', function () {
     return response()->json([
         'status'    => 'ok',
         'timestamp' => now()->toDateTimeString(),
