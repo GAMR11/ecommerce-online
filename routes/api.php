@@ -41,7 +41,7 @@ Route::prefix('metrics')
     });
 
 // Ruta de prueba (sin autenticación)
-Route::get('/ping', function () {
+Route::get('/ping', de () {
     return response()->json([
         'status'    => 'ok',
         'timestamp' => now()->toDateTimeString(),
