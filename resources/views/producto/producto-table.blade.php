@@ -112,7 +112,7 @@
         <script>
             Swal.fire({
                 icon: 'error',
-                title: 'Errores en el formulario',
+                title: 'Error en el formulario',
                 html: `{!! implode('<br>', $errors->all()) !!}`,
                 toast: true,
                 position: 'top-end',
