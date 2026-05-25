@@ -13,7 +13,7 @@ use RealRashid\SweetAlert\Facades\Alert;
 class ReporteController extends Controller
 {
     /**
-     * Display a listing of the resource.
+     * Display a listing of the resource. 
      */
     public function index()
     {
@@ -23,7 +23,7 @@ class ReporteController extends Controller
 
     public function update(Request $request, $id)
     {
-        // Desestructuración de la solicitud
+        // Desestructuración de la solicitud //
 
 
 
