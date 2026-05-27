@@ -178,9 +178,6 @@ pipeline {
                 script {
                     echo '🧪 Ejecutando tests...'
 
-                    // FALLO TEMPORAL — remover luego de capturar MTTR
-                    error('Fallo intencional para generar datos de MTTR')
-
                     env.TEST_START = ((long)(System.currentTimeMillis() / 1000)).toString()
                     bat 'docker compose exec -T app php artisan test'
                     env.TEST_DURATION = ((long)(System.currentTimeMillis() / 1000) - env.TEST_START.toLong()).toString()
